@@ -98,13 +98,24 @@ CREATE TABLE IF NOT EXISTS qualifying_results (
     points        NUMERIC(6,2),
     UNIQUE (race_id, driver_number)
 );
+
+CREATE TABLE IF NOT EXISTS orderbook_snapshots (
+    id              SERIAL PRIMARY KEY,
+    market_id       INTEGER REFERENCES markets(id),
+    best_yes_bid    NUMERIC(6,4),
+    best_yes_ask    NUMERIC(6,4),
+    best_no_bid     NUMERIC(6,4),
+    best_no_ask     NUMERIC(6,4),
+    volume_24h      NUMERIC(12,2),
+    snapshot_at     TIMESTAMPTZ DEFAULT NOW()
+);
 """
 
 
 def init_db():
     with cursor() as cur:
         cur.execute(SCHEMA)
-    console.print("[green]Schema created successfully (8 tables).[/]")
+    console.print("[green]Schema created successfully (9 tables).[/]")
 
 
 if __name__ == "__main__":

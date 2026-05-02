@@ -51,7 +51,7 @@ def compute_quali_to_finish_delta(
         (results["season"] == current_season) & (results["round"] < current_round)
     ].copy()
     prior = prior.sort_values("round", ascending=False)
-    prior["delta"] = prior["grid_position"] - prior["position"]
+    prior = prior.assign(delta=prior["grid_position"] - prior["position"])
     recent = prior.groupby("abbreviation").head(n)
     return (
         recent.groupby("abbreviation")["delta"]

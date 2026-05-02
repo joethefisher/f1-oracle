@@ -51,24 +51,13 @@ def compute_pnl(bet_size: float, kalshi_mid: float, won: bool) -> float:
     return -bet_size
 
 
-def _name_to_abbrev_map(race_id: int) -> dict:
-    """Build {driver_name_lower: abbreviation} from race_results for fuzzy matching."""
-    from tools.db import cursor
-    with cursor() as cur:
-        cur.execute(
-            "SELECT driver_name, abbreviation FROM race_results WHERE race_id = %s",
-            (race_id,),
-        )
-        return {row[0].lower(): row[1] for row in cur.fetchall()}
-
-
 def settle_race(race_id: int):
     """Query DB, match results to virtual bets, write outcomes."""
     from tools.db import cursor
 
     with cursor() as cur:
         cur.execute("""
-            SELECT m.id, m.market_type, m.driver_name,
+            SELECT m.id, m.market_type, m.driver_abbreviation,
                    p.id AS pred_id, p.kalshi_mid_price,
                    vb.id AS bet_id, vb.bet_size_dollars
             FROM markets m
@@ -90,22 +79,10 @@ def settle_race(race_id: int):
         )
         quali_results = {r[0]: r[1] for r in cur.fetchall()}
 
-    name_to_abbrev = _name_to_abbrev_map(race_id)
-
     settled = 0
     with cursor() as cur:
         for row in bets:
-            market_id, market_type, driver_name, pred_id, kalshi_mid, bet_id, bet_size = row
-
-            # Match Kalshi driver_name to abbreviation via race_results
-            abbrev = name_to_abbrev.get((driver_name or "").lower())
-            if abbrev is None:
-                # Try partial match (last name)
-                last = (driver_name or "").split()[-1].lower() if driver_name else ""
-                for full_name, ab in name_to_abbrev.items():
-                    if last and last in full_name:
-                        abbrev = ab
-                        break
+            market_id, market_type, abbrev, pred_id, kalshi_mid, bet_id, bet_size = row
 
             won = determine_winner(
                 market_type,

@@ -14,16 +14,22 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}>
-      <body className="min-h-full flex flex-col bg-zinc-950 text-zinc-100">
-        <header className="border-b border-zinc-800 bg-zinc-950">
-          <div className="max-w-5xl mx-auto px-4 py-3 flex items-center gap-3">
-            <span className="text-red-500 font-bold text-lg">F1</span>
-            <span className="font-semibold text-white">Oracle</span>
-            <span className="text-zinc-500 text-sm ml-1">ML model vs the crowd</span>
+      <body className="min-h-full flex flex-col" style={{ background: "#100D0B", color: "#FAFAFA" }}>
+        <header style={{ background: "#100D0B" }}>
+          <div style={{ maxWidth: 1100, margin: "0 auto", padding: "32px 32px 0" }}>
+            <div style={{ display: "flex", alignItems: "baseline", gap: 14 }}>
+              <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
+                <span style={{ fontWeight: 800, fontSize: 26, color: "#E8002D", letterSpacing: "-0.02em", lineHeight: 1 }}>F1</span>
+                <span style={{ fontWeight: 600, fontSize: 26, color: "#FAFAFA", letterSpacing: "-0.02em", lineHeight: 1 }}>Oracle</span>
+              </div>
+              <span style={{ color: "#52525B", fontSize: 13 }}>ML model vs the crowd</span>
+            </div>
           </div>
         </header>
         <TabNav />
-        <main className="flex-1 max-w-5xl mx-auto w-full px-4 py-6">{children}</main>
+        <main className="flex-1" style={{ maxWidth: 1100, margin: "0 auto", width: "100%", padding: "28px 32px 48px" }}>
+          {children}
+        </main>
       </body>
     </html>
   );

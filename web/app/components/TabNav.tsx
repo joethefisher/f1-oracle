@@ -11,19 +11,25 @@ const TABS = [
 export function TabNav() {
   const path = usePathname();
   return (
-    <nav className="border-b border-zinc-800 bg-zinc-950">
-      <div className="max-w-5xl mx-auto px-4 flex gap-0">
+    <nav style={{ borderBottom: "1px solid #1F1F23", background: "#100D0B" }}>
+      <div style={{ maxWidth: 1100, margin: "0 auto", padding: "0 32px", display: "flex", gap: 28 }}>
         {TABS.map((tab) => {
           const active = path.startsWith(tab.href);
           return (
             <Link
               key={tab.href}
               href={tab.href}
-              className={`px-5 py-3 text-sm font-medium border-b-2 transition-colors ${
-                active
-                  ? "border-red-500 text-white"
-                  : "border-transparent text-zinc-400 hover:text-zinc-200"
-              }`}
+              style={{
+                padding: "12px 2px",
+                fontSize: 14,
+                fontWeight: active ? 500 : 400,
+                color: active ? "#FAFAFA" : "#A1A1AA",
+                borderBottom: active ? "2px solid #E8002D" : "2px solid transparent",
+                marginBottom: -1,
+                letterSpacing: "-0.005em",
+                textDecoration: "none",
+                display: "block",
+              }}
             >
               {tab.label}
             </Link>

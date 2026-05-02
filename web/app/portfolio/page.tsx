@@ -68,7 +68,7 @@ export default async function PortfolioPage() {
               </thead>
               <tbody className="divide-y divide-zinc-800">
                 {[...snapshots].reverse().map((snap) => (
-                  <tr key={snap.id} className="hover:bg-zinc-900/50 transition-colors">
+                  <tr key={snap.id} className="bg-zinc-950 hover:bg-zinc-900 transition-colors">
                     <td className="px-4 py-3 text-white">{snap.race_name}</td>
                     <td className="px-4 py-3 text-right font-medium text-white">
                       ${snap.bankroll_after.toFixed(2)}

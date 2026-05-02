@@ -104,7 +104,7 @@ export default function RecordView({ records }: { records: RaceRecord[] }) {
                   </thead>
                   <tbody className="divide-y divide-zinc-800">
                     {record.bets.map((bet, i) => (
-                      <tr key={i} className="hover:bg-zinc-900/50">
+                      <tr key={i} className="bg-zinc-950 hover:bg-zinc-900 transition-colors">
                         <td className="px-4 py-2.5 text-white">{bet.driver_name}</td>
                         <td className="px-4 py-2.5 text-zinc-400">{MARKET_LABELS[bet.market_type]}</td>
                         <td className="px-4 py-2.5 text-right text-white">

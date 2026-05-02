@@ -15,6 +15,17 @@ console = Console()
 
 BASE = "https://api.jolpi.ca/ergast/f1"
 
+# Jolpica locality names that differ across seasons for the same circuit
+_CIRCUIT_ALIASES = {
+    "Miami Gardens": "Miami",
+    "Sakhir": "Bahrain",
+    "Yas Marina Circuit": "Abu Dhabi",
+}
+
+
+def normalize_circuit(locality: str) -> str:
+    return _CIRCUIT_ALIASES.get(locality, locality)
+
 
 def fetch_season_schedule(season: int) -> list[dict]:
     resp = requests.get(f"{BASE}/{season}.json?limit=30", timeout=15)
@@ -38,7 +49,7 @@ def setup_season(season: int):
         for r in races:
             round_num = int(r["round"])
             name = r["raceName"]
-            circuit = r["Circuit"]["Location"]["locality"]
+            circuit = normalize_circuit(r["Circuit"]["Location"]["locality"])
             race_date = r["date"] + "T" + r.get("time", "14:00:00")
             is_sprint = (season, round_num) in SPRINT_ROUNDS
 

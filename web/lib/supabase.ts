@@ -1,6 +1,5 @@
-import { createClient } from "@supabase/supabase-js";
-
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "";
-
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+// Re-export helpers so pages can import from one place.
+// Server components: import { createClient } from "@/utils/supabase/server"
+// Client components: import { createClient } from "@/utils/supabase/client"
+export { createClient as createServerClient } from "@/utils/supabase/server";
+export { createClient as createBrowserClient } from "@/utils/supabase/client";

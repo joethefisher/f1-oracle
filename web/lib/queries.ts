@@ -72,14 +72,28 @@ export async function getRacePredictions(
     .filter((r): r is RacePredictionRow => r !== null);
 }
 
-export async function getSeasonRecords(): Promise<RaceRecord[]> {
+export async function getSeasonRecords(season?: number): Promise<RaceRecord[]> {
   const supabase = await createServerClient();
+
+  // First resolve which season to show: use the provided season, or find the latest
+  let targetSeason = season;
+  if (!targetSeason) {
+    const { data: latestRace } = await supabase
+      .from("races")
+      .select("season")
+      .eq("status", "completed")
+      .order("season", { ascending: false })
+      .limit(1)
+      .single();
+    if (!latestRace) return [];
+    targetSeason = (latestRace as { season: number }).season;
+  }
 
   const { data: races } = await supabase
     .from("races")
     .select("*")
     .eq("status", "completed")
-    .order("season", { ascending: false })
+    .eq("season", targetSeason)
     .order("round", { ascending: false });
 
   if (!races || races.length === 0) return [];

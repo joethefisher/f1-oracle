@@ -17,7 +17,7 @@ function formatDate(iso: string | null | undefined): string {
   return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
 
-export default function RecordView({ records }: { records: RaceRecord[] }) {
+export default function RecordView({ records, season }: { records: RaceRecord[]; season?: number }) {
   const firstId = records[0]?.race.id;
   const [open, setOpen] = useState<Set<number>>(
     firstId !== undefined ? new Set([firstId]) : new Set()
@@ -48,13 +48,15 @@ export default function RecordView({ records }: { records: RaceRecord[] }) {
     textAlign: "left",
   };
 
+  const seasonYear = season ?? records[0]?.race.season ?? new Date().getFullYear();
+
   if (records.length === 0) {
     return (
       <div>
         <h1 style={{ fontSize: 32, fontWeight: 600, letterSpacing: "-0.025em", margin: 0, color: "#FAFAFA", marginBottom: 6 }}>
           Season Record
         </h1>
-        <div style={{ fontSize: 13, color: "#71717A", marginBottom: 22 }}>2026 season · 0 of 24 races settled</div>
+        <div style={{ fontSize: 13, color: "#71717A", marginBottom: 22 }}>{seasonYear} season · 0 races settled</div>
         <div style={{ background: "#0E0E10", border: "1px solid #1F1F23", borderRadius: 8, padding: "32px 20px", textAlign: "center", color: "#71717A", fontSize: 14 }}>
           No settled bets yet. Season record will appear here after the first race.
         </div>
@@ -69,7 +71,7 @@ export default function RecordView({ records }: { records: RaceRecord[] }) {
         Season Record
       </h1>
       <div style={{ fontSize: 13, color: "#71717A", marginBottom: 22 }}>
-        2026 season · {records.length} of 24 races settled
+        {seasonYear} season · {records.length} race{records.length !== 1 ? "s" : ""} settled
       </div>
 
       {/* Stat cards */}

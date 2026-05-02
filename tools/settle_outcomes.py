@@ -2,7 +2,8 @@
 Settle virtual bets after a race by matching results to predictions.
 
 Usage:
-    python tools/settle_outcomes.py --race-id 1
+    python -m tools.settle_outcomes --season 2025 --round 6
+    python -m tools.settle_outcomes --race-id 42
 """
 import argparse
 from rich.console import Console
@@ -16,12 +17,19 @@ def determine_winner(
     market_type: str,
     driver_abbreviation: str,
     race_results: dict,
+    quali_results: dict | None = None,
 ) -> bool:
     """
-    Determine if a YES bet on driver_abbreviation resolves True.
+    Determine if a YES bet resolves True.
     race_results: {abbreviation: finishing_position}
+    quali_results: {abbreviation: qualifying_position}  (used for pole market)
     """
-    position = race_results.get(driver_abbreviation)
+    if market_type == "pole":
+        results = quali_results or race_results
+    else:
+        results = race_results
+
+    position = results.get(driver_abbreviation)
     if position is None:
         return False
     if market_type == "race_winner":
@@ -43,48 +51,104 @@ def compute_pnl(bet_size: float, kalshi_mid: float, won: bool) -> float:
     return -bet_size
 
 
-def settle_race(race_id: int):
-    """Query DB, match results to virtual bets, write outcomes and P&L."""
+def _name_to_abbrev_map(race_id: int) -> dict:
+    """Build {driver_name_lower: abbreviation} from race_results for fuzzy matching."""
     from tools.db import cursor
+    with cursor() as cur:
+        cur.execute(
+            "SELECT driver_name, abbreviation FROM race_results WHERE race_id = %s",
+            (race_id,),
+        )
+        return {row[0].lower(): row[1] for row in cur.fetchall()}
+
+
+def settle_race(race_id: int):
+    """Query DB, match results to virtual bets, write outcomes."""
+    from tools.db import cursor
+
     with cursor() as cur:
         cur.execute("""
             SELECT m.id, m.market_type, m.driver_name,
-                   p.id as pred_id, p.kalshi_mid_price,
-                   vb.id as bet_id, vb.bet_size_dollars
+                   p.id AS pred_id, p.kalshi_mid_price,
+                   vb.id AS bet_id, vb.bet_size_dollars
             FROM markets m
             JOIN predictions p ON p.market_id = m.id
             JOIN virtual_bets vb ON vb.prediction_id = p.id
             WHERE m.race_id = %s
         """, (race_id,))
-        rows = cur.fetchall()
+        bets = cur.fetchall()
 
-        cur.execute("""
-            SELECT abbreviation, position FROM race_results
-            WHERE race_id = %s
-        """, (race_id,))
-        results_rows = cur.fetchall()
+        cur.execute(
+            "SELECT abbreviation, position FROM race_results WHERE race_id = %s AND position IS NOT NULL",
+            (race_id,),
+        )
+        race_results = {r[0]: r[1] for r in cur.fetchall()}
 
-    race_results = {r[0]: r[1] for r in results_rows}
+        cur.execute(
+            "SELECT abbreviation, position FROM qualifying_results WHERE race_id = %s AND position IS NOT NULL",
+            (race_id,),
+        )
+        quali_results = {r[0]: r[1] for r in cur.fetchall()}
 
+    name_to_abbrev = _name_to_abbrev_map(race_id)
+
+    settled = 0
     with cursor() as cur:
-        for row in rows:
+        for row in bets:
             market_id, market_type, driver_name, pred_id, kalshi_mid, bet_id, bet_size = row
-            abbrev = driver_name.split()[-1].upper() if driver_name else ""
-            won = determine_winner(market_type, abbrev, race_results)
-            pnl = compute_pnl(bet_size or 0.0, kalshi_mid or 0.5, won)
+
+            # Match Kalshi driver_name to abbreviation via race_results
+            abbrev = name_to_abbrev.get((driver_name or "").lower())
+            if abbrev is None:
+                # Try partial match (last name)
+                last = (driver_name or "").split()[-1].lower() if driver_name else ""
+                for full_name, ab in name_to_abbrev.items():
+                    if last and last in full_name:
+                        abbrev = ab
+                        break
+
+            won = determine_winner(
+                market_type,
+                abbrev or "",
+                race_results,
+                quali_results if quali_results else None,
+            )
+
             cur.execute("""
                 INSERT INTO outcomes (market_id, winning_side, settled_at, source)
                 VALUES (%s, %s, NOW(), 'fastf1')
                 ON CONFLICT (market_id) DO UPDATE SET winning_side = EXCLUDED.winning_side
             """, (market_id, "yes" if won else "no"))
+            settled += 1
+
+    console.print(f"[green]Settled {settled} outcomes for race {race_id}[/]")
 
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--race-id", type=int, required=True)
+    group = parser.add_mutually_exclusive_group(required=True)
+    group.add_argument("--race-id", type=int)
+    group.add_argument("--season", type=int)
+    parser.add_argument("--round", type=int, dest="round_num")
     args = parser.parse_args()
-    settle_race(args.race_id)
-    console.print(f"[green]Settled race {args.race_id}[/]")
+
+    if args.race_id:
+        race_id = args.race_id
+    else:
+        if not args.round_num:
+            parser.error("--round is required when using --season")
+        from tools.db import cursor
+        with cursor() as cur:
+            cur.execute(
+                "SELECT id FROM races WHERE season = %s AND round = %s",
+                (args.season, args.round_num),
+            )
+            row = cur.fetchone()
+        if not row:
+            raise ValueError(f"No race found for {args.season} R{args.round_num}")
+        race_id = row[0]
+
+    settle_race(race_id)
 
 
 if __name__ == "__main__":

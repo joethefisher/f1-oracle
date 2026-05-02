@@ -31,6 +31,7 @@ CREATE TABLE IF NOT EXISTS markets (
     kalshi_event_ticker TEXT NOT NULL,
     market_type         TEXT NOT NULL,
     driver_name         TEXT,
+    driver_abbreviation VARCHAR(10),
     status              TEXT NOT NULL DEFAULT 'open',
     created_at          TIMESTAMPTZ DEFAULT NOW()
 );

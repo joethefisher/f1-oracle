@@ -17,6 +17,10 @@ HEADERS = {"Accept": "application/json"}
 console = Console()
 
 
+def _extract_abbreviation(ticker: str) -> str:
+    return ticker.rsplit("-", 1)[-1].upper()
+
+
 def build_market_rows(markets: list[dict], race_id: int, market_type: str) -> list[dict]:
     rows = []
     for m in markets:
@@ -27,6 +31,7 @@ def build_market_rows(markets: list[dict], race_id: int, market_type: str) -> li
             "kalshi_event_ticker": m["event_ticker"],
             "market_type": market_type,
             "driver_name": driver_name,
+            "driver_abbreviation": _extract_abbreviation(m["ticker"]),
             "status": m.get("status", "open"),
         })
     return rows
@@ -51,13 +56,14 @@ def save_markets(race_id: int, event_ticker: str, market_type: str):
         for row in rows:
             cur.execute("""
                 INSERT INTO markets
-                    (race_id, kalshi_ticker, kalshi_event_ticker, market_type, driver_name, status)
-                VALUES (%s, %s, %s, %s, %s, %s)
+                    (race_id, kalshi_ticker, kalshi_event_ticker, market_type, driver_name, driver_abbreviation, status)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (kalshi_ticker) DO UPDATE
-                    SET status = EXCLUDED.status
+                    SET status = EXCLUDED.status,
+                        driver_abbreviation = EXCLUDED.driver_abbreviation
             """, (
                 row["race_id"], row["kalshi_ticker"], row["kalshi_event_ticker"],
-                row["market_type"], row["driver_name"], row["status"],
+                row["market_type"], row["driver_name"], row["driver_abbreviation"], row["status"],
             ))
     console.print(f"[green]Saved {len(rows)} {market_type} markets for {event_ticker}[/]")
 

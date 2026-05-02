@@ -86,15 +86,16 @@ def load_qualifying_for_race(race_id: int) -> pd.DataFrame:
 
 
 def get_markets_for_race(race_id: int, market_type: str) -> dict:
-    """Returns {driver_abbreviation_or_name: (market_id, kalshi_mid)} using driver_name."""
+    """Returns {abbreviation: market_id} using driver_abbreviation from ticker."""
     with cursor() as cur:
         cur.execute("""
-            SELECT id, driver_name
+            SELECT id, driver_abbreviation
             FROM markets
-            WHERE race_id = %s AND market_type = %s AND status = 'open'
+            WHERE race_id = %s AND market_type = %s AND status IN ('open', 'active')
+              AND driver_abbreviation IS NOT NULL
         """, (race_id, market_type))
         rows = cur.fetchall()
-    return {row[1]: row[0] for row in rows}  # driver_name → market_id
+    return {row[1]: row[0] for row in rows}  # abbreviation → market_id
 
 
 def get_current_bankroll() -> float:
@@ -108,24 +109,19 @@ def get_current_bankroll() -> float:
 
 
 def save_predictions_and_get_ids(
-    market_name_map: dict,
+    market_abbrev_map: dict,
     predictions: list[dict],
     kalshi_mid_map: dict,
-    abbrev_to_name: dict,
 ) -> dict:
     """
     Saves predictions to DB and returns {market_id: prediction_id}.
-    market_name_map: {driver_name: market_id}
-    abbrev_to_name: {abbreviation: driver_name}
+    market_abbrev_map: {abbreviation: market_id}
     """
     pred_id_map = {}
     with cursor() as cur:
         for pred in predictions:
             abbrev = pred["abbreviation"]
-            driver_name = abbrev_to_name.get(abbrev)
-            if driver_name is None:
-                continue
-            market_id = market_name_map.get(driver_name)
+            market_id = market_abbrev_map.get(abbrev)
             if market_id is None:
                 continue
             kalshi_mid = kalshi_mid_map.get(market_id, 0.0)
@@ -162,24 +158,6 @@ def get_kalshi_mids(race_id: int, market_type: str) -> dict:
             mids[market_id] = float(yes_ask)
     return mids
 
-
-def load_abbrev_to_name(race_id: int) -> dict:
-    """Build {abbreviation: driver_name} from race_results for this race."""
-    with cursor() as cur:
-        cur.execute(
-            "SELECT abbreviation, driver_name FROM race_results WHERE race_id = %s",
-            (race_id,),
-        )
-        rows = cur.fetchall()
-    if not rows:
-        cur2_result = None
-        with cursor() as cur:
-            cur.execute(
-                "SELECT abbreviation, driver_name FROM qualifying_results WHERE race_id = %s",
-                (race_id,),
-            )
-            rows = cur.fetchall()
-    return {r[0]: r[1] for r in rows}
 
 
 def run_race(season: int, round_num: int, market_types: list[str]):
@@ -221,7 +199,6 @@ def run_race(season: int, round_num: int, market_types: list[str]):
     )
     console.print(f"Built features for {len(features)} drivers")
 
-    abbrev_to_name = load_abbrev_to_name(race_id)
     bankroll = get_current_bankroll()
     console.print(f"Current bankroll: ${bankroll:.2f}")
 
@@ -235,29 +212,27 @@ def run_race(season: int, round_num: int, market_types: list[str]):
 
         preds = predict_race(features, model)
 
-        market_name_map = get_markets_for_race(race_id, market_type)
-        if not market_name_map:
+        market_abbrev_map = get_markets_for_race(race_id, market_type)
+        if not market_abbrev_map:
             console.print(f"[yellow]No open markets in DB for {market_type}. Run save_markets first.[/]")
             continue
 
         kalshi_mid_map = get_kalshi_mids(race_id, market_type)
 
         pred_id_map = save_predictions_and_get_ids(
-            market_name_map, preds, kalshi_mid_map, abbrev_to_name
+            market_abbrev_map, preds, kalshi_mid_map
         )
         console.print(f"Saved {len(pred_id_map)} predictions")
 
         bet_inputs = [
             {
                 "abbreviation": p["abbreviation"],
-                "market_id": market_name_map.get(abbrev_to_name.get(p["abbreviation"], ""), 0),
+                "market_id": market_abbrev_map.get(p["abbreviation"], 0),
                 "oracle_probability": p["probability"],
-                "kalshi_mid": kalshi_mid_map.get(
-                    market_name_map.get(abbrev_to_name.get(p["abbreviation"], ""), 0), 0.0
-                ),
+                "kalshi_mid": kalshi_mid_map.get(market_abbrev_map.get(p["abbreviation"], 0), 0.0),
             }
             for p in preds
-            if abbrev_to_name.get(p["abbreviation"]) in market_name_map
+            if p["abbreviation"] in market_abbrev_map
         ]
         bets = compute_bets(bet_inputs, bankroll)
         n_bets = sum(1 for b in bets if b["bet_size"] > 0)
@@ -266,8 +241,7 @@ def run_race(season: int, round_num: int, market_types: list[str]):
 
         for p in preds[:5]:
             abbrev = p["abbreviation"]
-            name = abbrev_to_name.get(abbrev, abbrev)
-            market_id = market_name_map.get(name, 0)
+            market_id = market_abbrev_map.get(abbrev, 0)
             mid = kalshi_mid_map.get(market_id, 0.0)
             edge = p["probability"] - mid
             console.print(

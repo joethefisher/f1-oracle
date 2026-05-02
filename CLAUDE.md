@@ -1,7 +1,7 @@
-# F1 Kalshi Autonomous Betting Agent
+# F1 Oracle
 
 ## Project Overview
-Autonomous AI agent that participates in Kalshi F1 race weekend prediction markets, continuously learning from its own decisions. Fixed bankroll of $1,000. No human approval gates. See `f1_kalshi_bot_design_v2.md` for full design spec.
+A public website that runs an ML model against F1 race weekend prediction markets, grading itself after every race. Visitors can see the Oracle's probability estimates vs. Kalshi market prices, track its virtual $1,000 portfolio using half-Kelly bet sizing, and follow its season-long record. No real money — purely a public scorecard that answers: *does having a model beat following the crowd?*
 
 ## WAT Framework
 This project follows the WAT (Workflows, Agents, Tools) architecture:
@@ -10,50 +10,43 @@ This project follows the WAT (Workflows, Agents, Tools) architecture:
 - `.tmp/` — Temporary processing files (regenerable, gitignored)
 - `.env` — All secrets and API keys (gitignored, never in code)
 
-## Build Phases
-1. **Foundation** — Kalshi auth, Postgres schema, data ingestion, reconciliation
-2. **Prediction model** — Multinomial model, Platt scaling calibration, historical backtest
-3. **Strategy and execution** — Edge detection, sizing, compliance layer
-4. **Dashboard** — Read-only Streamlit/Next.js app against same Postgres DB
-5. **Shadow mode** — 2-3 race weekends, no real orders, validate calibration
-6. **Learning layer** — Post-mortem agent (Claude API), calibration updates, lessons DB
-7. **Live deployment** — Production credentials, Fly.io or Railway
-8. **Continuous learning** — Weekly Monday cycle ongoing
+## Three Public Tabs
+1. **Race Weekend** — Oracle predictions vs Kalshi market prices, current race weekend. Sub-markets: race winner, podium, pole, sprint.
+2. **Season Record** — Every past prediction with outcome (win/loss) and portfolio P&L impact.
+3. **Portfolio** — Cumulative virtual portfolio curve from $1,000 starting value, half-Kelly sized bets.
+
+## Virtual Portfolio Rules
+- Starting bankroll: $1,000
+- Bet sizing: half-Kelly based on Oracle edge over Kalshi mid-price
+- Minimum edge to bet: 5% over Kalshi implied probability
+- Markets in scope: race winner, podium, pole position, sprint winner
+- Average Kalshi bettor baseline: same markets, bet proportional to Kalshi prices, shown on Portfolio tab for comparison
 
 ## Key Design Decisions
-- **Postgres** over SQLite (concurrent dashboard reads)
-- **Deterministic `client_order_id`**: `{race_weekend}_{market_ticker}_{decision_timestamp}`
-- **Reconciliation on every startup** — never assume DB matches Kalshi reality
-- **Calibration layer** (Platt scaling) — raw model probabilities are overconfident
-- **Post-mortem agent** — Claude API (~$1-5/weekend), capped at $20/weekend
-- **Hold to settlement** — no active in-race position management in v1
-
-## Compliance Hard Caps
-- Max single bet: 5% of current bankroll
-- Max total open exposure: 25% of bankroll
-- Max correlated cluster: 15% of bankroll
-- Max bets/weekend: 15
-- Kill switch: bankroll < $200 OR 3 consecutive negative weekends
-
-## Rate Limits
-- Read API: max 50/min, 50ms jitter minimum
-- Order placement: max 10/min
-- Exponential backoff on 429s
+- **No real money** — virtual portfolio only, no Kalshi account required
+- **Public, read-only** — no user accounts, no login
+- **Kalshi public API** — all market data via unauthenticated endpoints
+- **FastF1** — primary F1 data source for model features
+- **Postgres (Supabase)** — all predictions, outcomes, portfolio state
+- **Half-Kelly sizing** — full Kelly produces excessive variance for a public product
 
 ## Data Sources
-- **FastF1** — primary (telemetry, lap times, historical results)
+- **Kalshi public API** — market prices, order books (no auth required)
+- **FastF1** — telemetry, lap times, qualifying results, historical data
 - **OpenF1 API** — fallback/cross-check
-- **Jolpica F1 API** (Ergast successor) — historical circuit data
+- **Jolpica F1 API** — historical circuit data back to 1950
 - **Open-Meteo** — weather forecasts
 
 ## Environment Variables Required
 ```
-KALSHI_API_KEY_ID=
-KALSHI_PRIVATE_KEY_PEM=
-KALSHI_BASE_URL=https://api.elections.kalshi.com/trade-api/v2
 DATABASE_URL=
 ANTHROPIC_API_KEY=
 ```
 
-## Success Metric
-Brier score on race winner predictions trending down across the season. Not PnL.
+## Build Phases
+1. **Foundation** — Supabase schema, data ingestion, Kalshi public market snapshots
+2. **Prediction model** — Multinomial model, calibration layer, historical backtest
+3. **Virtual portfolio engine** — half-Kelly sizing, bet logging, outcome settlement
+4. **Public website** — Next.js, three tabs, deployed to Vercel
+5. **Shadow mode** — 2-3 race weekends logging predictions without publishing
+6. **Launch** — go public, post-race grading cycle live

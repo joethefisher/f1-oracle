@@ -2,6 +2,9 @@
 import { useState } from "react";
 import type { RacePredictionRow } from "@/lib/queries";
 import type { MarketType, Race } from "@/lib/types";
+import { BetBadge, SectionCard, ProbBar, Edge } from "@/app/components/ui";
+
+const MONO = "var(--font-geist-mono), ui-monospace, monospace";
 
 const MARKETS: { key: MarketType; label: string }[] = [
   { key: "race_winner", label: "Race Winner" },
@@ -11,47 +14,6 @@ const MARKETS: { key: MarketType; label: string }[] = [
 
 function abbrevFromTicker(ticker: string): string {
   return ticker.split("-").pop() ?? "";
-}
-
-function EdgeBadge({ edge }: { edge: number }) {
-  if (Math.abs(edge) < 0.02) return <span className="text-zinc-600 text-xs">—</span>;
-  const positive = edge > 0;
-  return (
-    <span className={`inline-flex items-center gap-0.5 text-xs font-semibold ${positive ? "text-emerald-400" : "text-red-400"}`}>
-      {positive ? "▲" : "▼"} {Math.abs(edge * 100).toFixed(1)}%
-    </span>
-  );
-}
-
-function BetBadge({ edge }: { edge: number }) {
-  if (edge < 0.05) return null;
-  return (
-    <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
-      BET
-    </span>
-  );
-}
-
-function ProbBars({ oracle, kalshi }: { oracle: number; kalshi: number }) {
-  const showKalshi = kalshi > 0 && kalshi < 0.94;
-  return (
-    <div className="flex flex-col gap-1 min-w-[100px]">
-      <div className="flex items-center gap-2">
-        <div className="w-16 h-1.5 rounded-full bg-zinc-800 overflow-hidden">
-          <div className="h-full bg-red-500 rounded-full" style={{ width: `${Math.min(oracle * 100, 100)}%` }} />
-        </div>
-        <span className="text-xs text-white tabular-nums w-10">{(oracle * 100).toFixed(1)}%</span>
-      </div>
-      {showKalshi && (
-        <div className="flex items-center gap-2">
-          <div className="w-16 h-1.5 rounded-full bg-zinc-800 overflow-hidden">
-            <div className="h-full bg-zinc-500 rounded-full" style={{ width: `${Math.min(kalshi * 100, 100)}%` }} />
-          </div>
-          <span className="text-xs text-zinc-500 tabular-nums w-10">{(kalshi * 100).toFixed(1)}%</span>
-        </div>
-      )}
-    </div>
-  );
 }
 
 interface Props {
@@ -72,113 +34,141 @@ export default function RaceView({ race, predictions }: Props) {
       })
     : null;
 
-  const betsPlaced = rows.filter((r) => r.edge >= 0.05).length;
+  const betsPlaced = rows.filter((r) => r.edge >= 0.05);
+
+  const headerCell: React.CSSProperties = {
+    fontSize: 10,
+    textTransform: "uppercase",
+    letterSpacing: "0.14em",
+    color: "#71717A",
+    fontWeight: 500,
+    padding: "12px 20px",
+    background: "#131316",
+    borderBottom: "1px solid #1F1F23",
+    textAlign: "left",
+  };
 
   return (
-    <div className="space-y-5">
-      {/* Header */}
-      <div>
-        <h1 className="text-xl font-semibold text-white">{race.name}</h1>
-        <div className="flex items-center gap-2 mt-1 flex-wrap">
-          <span className="text-zinc-500 text-sm">Round {race.round} · {race.circuit}</span>
-          {updatedAt && (
-            <span className="text-zinc-600 text-xs">· Model updated {updatedAt}</span>
-          )}
+    <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
+      {/* Title row */}
+      <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", marginBottom: 6 }}>
+        <h1 style={{ fontSize: 32, fontWeight: 600, letterSpacing: "-0.025em", margin: 0, color: "#FAFAFA" }}>
+          {race.name}
+        </h1>
+        <div style={{ fontSize: 12, color: "#52525B", fontFamily: MONO }}>
+          LIVE · MODEL v0.4
         </div>
       </div>
 
-      {/* Market tabs */}
-      <div className="flex gap-2">
-        {MARKETS.map((m) => (
-          <button
-            key={m.key}
-            onClick={() => setMarket(m.key)}
-            className={`px-4 py-1.5 rounded-full text-sm font-medium transition-colors ${
-              market === m.key
-                ? "bg-red-500 text-white"
-                : "bg-zinc-800 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700"
-            }`}
-          >
-            {m.label}
-          </button>
-        ))}
+      {/* Subtitle */}
+      <div style={{ fontSize: 13, color: "#71717A", marginBottom: 20 }}>
+        Round {race.round} · {race.circuit}
+        {updatedAt && ` · Model updated ${updatedAt}`}
+      </div>
+
+      {/* Bet summary strip */}
+      {betsPlaced.length > 0 && (
+        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", background: "rgba(16,185,129,0.06)", border: "1px solid rgba(16,185,129,0.25)", borderRadius: 8, marginBottom: 22 }}>
+          <BetBadge />
+          <span style={{ fontSize: 13, color: "#D4D4D8" }}>
+            Oracle placed{" "}
+            <span style={{ color: "#FAFAFA", fontWeight: 500 }}>{betsPlaced.length} bet{betsPlaced.length !== 1 ? "s" : ""}</span>
+            {" "}on this market (edge ≥ 5%)
+          </span>
+        </div>
+      )}
+
+      {/* Market pill tabs */}
+      <div style={{ display: "flex", gap: 8, marginBottom: 18 }}>
+        {MARKETS.map((m) => {
+          const active = market === m.key;
+          return (
+            <button
+              key={m.key}
+              onClick={() => setMarket(m.key)}
+              style={{
+                padding: "7px 14px",
+                borderRadius: 999,
+                fontSize: 13,
+                fontWeight: 500,
+                background: active ? "#E8002D" : "#18181B",
+                color: active ? "#FFFFFF" : "#A1A1AA",
+                border: active ? "1px solid transparent" : "1px solid #27272A",
+                cursor: "pointer",
+              }}
+            >
+              {m.label}
+            </button>
+          );
+        })}
       </div>
 
       {rows.length === 0 ? (
-        <div className="rounded-lg border border-zinc-800 bg-zinc-900 p-8 text-center text-zinc-500 text-sm">
+        <div style={{ background: "#0E0E10", border: "1px solid #1F1F23", borderRadius: 8, padding: "32px 20px", textAlign: "center", color: "#71717A", fontSize: 14 }}>
           No predictions yet for this market. Run the model after qualifying.
         </div>
       ) : (
         <>
-          {/* Summary strip */}
-          {betsPlaced > 0 && (
-            <div className="flex items-center gap-2 text-sm">
-              <span className="text-zinc-400">Oracle placed</span>
-              <span className="font-semibold text-emerald-400">{betsPlaced} bet{betsPlaced > 1 ? "s" : ""}</span>
-              <span className="text-zinc-400">on this market (edge ≥ 5%)</span>
-            </div>
-          )}
-
-          {/* Predictions table */}
-          <div className="rounded-lg border border-zinc-800 overflow-hidden">
-            <table className="w-full text-sm">
+          <SectionCard>
+            <table style={{ width: "100%", borderCollapse: "collapse" }}>
               <thead>
-                <tr className="bg-zinc-900 text-zinc-400 text-xs uppercase tracking-wide">
-                  <th className="text-left px-4 py-3 w-8">#</th>
-                  <th className="text-left px-4 py-3">Driver</th>
-                  <th className="text-left px-4 py-3">
-                    <div className="flex flex-col gap-0.5">
-                      <span className="text-red-400">Oracle</span>
-                      <span className="text-zinc-600 font-normal normal-case tracking-normal">vs Kalshi</span>
-                    </div>
-                  </th>
-                  <th className="text-right px-4 py-3">Edge</th>
+                <tr>
+                  <th style={{ ...headerCell, width: 48, textAlign: "center" }}>#</th>
+                  <th style={headerCell}>Driver</th>
+                  <th style={{ ...headerCell, width: 220 }}>Oracle vs Kalshi</th>
+                  <th style={{ ...headerCell, width: 110, textAlign: "right" }}>Edge</th>
                 </tr>
               </thead>
               <tbody>
                 {rows.map((row, i) => {
-                  const abbrev = abbrevFromTicker(row.kalshi_ticker);
                   const hasBet = row.edge >= 0.05;
+                  const rowBg = hasBet ? "rgba(16,185,129,0.06)" : (i % 2 === 0 ? "#0A0A0A" : "#0C0C0E");
+                  const abbrev = abbrevFromTicker(row.kalshi_ticker);
+                  const showKalshi = row.kalshi_mid_price > 0 && row.kalshi_mid_price < 0.94;
                   return (
-                    <tr
-                      key={i}
-                      className={`border-t border-zinc-800 transition-colors ${
-                        hasBet ? "bg-emerald-950/30 hover:bg-emerald-950/50" : "bg-zinc-950 hover:bg-zinc-900"
-                      }`}
-                    >
-                      <td className="px-4 py-3 text-zinc-600 text-xs tabular-nums">{i + 1}</td>
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="font-mono font-bold text-white text-sm">{abbrev}</span>
-                          <span className="text-zinc-400 text-xs">{row.driver_name}</span>
-                          <BetBadge edge={row.edge} />
+                    <tr key={i} style={{ background: rowBg, borderBottom: "1px solid #15151A" }}>
+                      <td style={{ padding: "16px 20px", color: "#52525B", fontSize: 12, fontFamily: MONO, textAlign: "center", borderLeft: hasBet ? "2px solid #10B981" : "2px solid transparent" }}>
+                        {String(i + 1).padStart(2, "0")}
+                      </td>
+                      <td style={{ padding: "14px 20px" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                          <span style={{ fontFamily: MONO, fontWeight: 700, color: "#FAFAFA", fontSize: 13, letterSpacing: "0.04em" }}>
+                            {abbrev}
+                          </span>
+                          <span style={{ color: "#A1A1AA", fontSize: 13 }}>{row.driver_name}</span>
+                          {hasBet && <BetBadge />}
                         </div>
                       </td>
-                      <td className="px-4 py-3">
-                        <ProbBars oracle={row.oracle_probability} kalshi={row.kalshi_mid_price} />
+                      <td style={{ padding: "12px 20px" }}>
+                        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                          <ProbBar valuePct={row.oracle_probability * 100} accent={true} />
+                          {showKalshi && <ProbBar valuePct={row.kalshi_mid_price * 100} accent={false} />}
+                        </div>
                       </td>
-                      <td className="px-4 py-3 text-right">
-                        <EdgeBadge edge={row.edge} />
+                      <td style={{ padding: "16px 20px", textAlign: "right" }}>
+                        <Edge valuePct={row.edge * 100} />
                       </td>
                     </tr>
                   );
                 })}
               </tbody>
             </table>
-          </div>
+          </SectionCard>
 
           {/* Legend */}
-          <div className="flex items-center gap-5 text-xs text-zinc-500">
-            <span className="flex items-center gap-1.5">
-              <span className="w-3 h-1.5 rounded-full bg-red-500 inline-block" /> Oracle probability
-            </span>
-            <span className="flex items-center gap-1.5">
-              <span className="w-3 h-1.5 rounded-full bg-zinc-500 inline-block" /> Kalshi mid-price
-            </span>
-            <span className="flex items-center gap-1.5">
-              <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">BET</span>
+          <div style={{ display: "flex", alignItems: "center", gap: 22, marginTop: 14, fontSize: 12, color: "#71717A" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+              <span style={{ width: 8, height: 8, borderRadius: 999, background: "#E8002D", display: "inline-block" }} />
+              Oracle probability
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+              <span style={{ width: 8, height: 8, borderRadius: 999, background: "#52525B", display: "inline-block" }} />
+              Kalshi mid-price
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+              <BetBadge />
               Virtual bet placed (edge ≥ 5%)
-            </span>
+            </div>
           </div>
         </>
       )}

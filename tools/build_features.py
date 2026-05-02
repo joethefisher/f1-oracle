@@ -84,8 +84,10 @@ def build_race_features(
     df = df.join(delta, how="left")
 
     median_grid = df["grid_position"].median()
-    df["circuit_history"] = df["circuit_history"].fillna(median_grid)
-    df["recent_form"] = df["recent_form"].fillna(median_grid)
-    df["quali_to_finish_delta"] = df["quali_to_finish_delta"].fillna(0.0)
-    df["is_wet"] = int(is_wet)
+    df = df.assign(
+        circuit_history=df["circuit_history"].fillna(median_grid),
+        recent_form=df["recent_form"].fillna(median_grid),
+        quali_to_finish_delta=df["quali_to_finish_delta"].fillna(0.0),
+        is_wet=int(is_wet),
+    )
     return df.reset_index()

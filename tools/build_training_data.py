@@ -182,15 +182,24 @@ def main():
     console.print(f"Training data: {len(df)} rows across {n_training_races} races")
 
     targets = [args.market_type] if args.market_type else MARKET_TYPES
+    trained = []
     for market_type in targets:
         console.print(f"Training {market_type}...")
-        model = train_market_model(df, market_type)
+        try:
+            model = train_market_model(df, market_type)
+        except ValueError as e:
+            console.print(f"[yellow]Skipping {market_type}: {e}[/]")
+            continue
         save_model(model, market_type, args.model_dir)
         console.print(
             f"[green]✓ {market_type} saved → {args.model_dir}/{market_type}.joblib[/]"
         )
+        trained.append(market_type)
 
-    console.print("[green]All models trained successfully.[/]")
+    if trained:
+        console.print(f"[green]Trained: {', '.join(trained)}[/]")
+    else:
+        console.print("[red]No models trained — check data.[/]")
 
 
 if __name__ == "__main__":

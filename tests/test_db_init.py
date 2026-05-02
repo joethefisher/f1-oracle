@@ -6,9 +6,10 @@ def test_get_connection_raises_without_env(monkeypatch):
     monkeypatch.delenv("DATABASE_URL", raising=False)
     import importlib
     import tools.db as db
-    importlib.reload(db)
-    with pytest.raises(RuntimeError, match="DATABASE_URL"):
-        db.get_connection()
+    with patch("dotenv.load_dotenv"):
+        importlib.reload(db)
+        with pytest.raises(RuntimeError, match="DATABASE_URL"):
+            db.get_connection()
 
 
 def test_get_connection_uses_env(monkeypatch):

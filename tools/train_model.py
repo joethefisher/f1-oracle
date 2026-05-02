@@ -10,6 +10,8 @@ import numpy as np
 import pandas as pd
 import joblib
 from sklearn.linear_model import LogisticRegression
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
 
 FEATURE_COLS = ["grid_position", "recent_form", "circuit_history", "quali_to_finish_delta", "is_wet"]
 
@@ -23,25 +25,28 @@ _TARGET_COL = {
 MODEL_DIR = Path(__file__).parent.parent / ".tmp" / "models"
 
 
-def train(X: np.ndarray, y: np.ndarray) -> LogisticRegression:
-    model = LogisticRegression(max_iter=1000, random_state=42)
+def train(X: np.ndarray, y: np.ndarray) -> Pipeline:
+    model = Pipeline([
+        ("scaler", StandardScaler()),
+        ("clf", LogisticRegression(max_iter=1000, random_state=42)),
+    ])
     model.fit(X, y)
     return model
 
 
-def save_model(model: LogisticRegression, market_type: str, model_dir: Path) -> None:
+def save_model(model: Pipeline, market_type: str, model_dir: Path) -> None:
     model_dir.mkdir(parents=True, exist_ok=True)
     joblib.dump(model, model_dir / f"{market_type}.joblib")
 
 
-def load_model(market_type: str, model_dir: Path = MODEL_DIR) -> LogisticRegression:
+def load_model(market_type: str, model_dir: Path = MODEL_DIR) -> Pipeline:
     path = model_dir / f"{market_type}.joblib"
     if not path.exists():
         raise FileNotFoundError(f"No saved model for {market_type} at {path}")
     return joblib.load(path)
 
 
-def train_market_model(df: pd.DataFrame, market_type: str) -> LogisticRegression:
+def train_market_model(df: pd.DataFrame, market_type: str) -> Pipeline:
     target = _TARGET_COL[market_type]
     X = df[FEATURE_COLS].values.astype(float)
     y = df[target].values

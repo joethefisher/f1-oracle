@@ -2,6 +2,7 @@ import numpy as np
 import tempfile
 from pathlib import Path
 from sklearn.linear_model import LogisticRegression
+from sklearn.pipeline import Pipeline
 import pandas as pd
 
 
@@ -34,8 +35,8 @@ def test_train_returns_fitted_model():
     X = df[FEATURE_COLS].values
     y = df["won"].values
     model = train(X, y)
-    assert isinstance(model, LogisticRegression)
-    assert hasattr(model, "coef_")
+    assert isinstance(model, Pipeline)
+    assert hasattr(model.named_steps["clf"], "coef_")
 
 
 def test_save_load_roundtrip():
@@ -57,14 +58,14 @@ def test_train_market_model_race_winner():
     from tools.train_model import train_market_model
     df = make_df()
     model = train_market_model(df, "race_winner")
-    assert isinstance(model, LogisticRegression)
+    assert isinstance(model, Pipeline)
 
 
 def test_train_market_model_podium():
     from tools.train_model import train_market_model
     df = make_df()
     model = train_market_model(df, "podium")
-    assert isinstance(model, LogisticRegression)
+    assert isinstance(model, Pipeline)
 
 
 def test_feature_cols_contains_expected():

@@ -6,6 +6,9 @@ import { BetBadge, SectionCard, ProbBar, Edge } from "@/app/components/ui";
 
 const MONO = "var(--font-geist-mono), ui-monospace, monospace";
 
+// Drivers whose Oracle rounds to 0.0% on display are hidden by default
+const VISIBLE_THRESHOLD = 0.0005;
+
 const MARKETS: { key: MarketType; label: string }[] = [
   { key: "race_winner", label: "Race Winner" },
   { key: "podium",      label: "Podium" },
@@ -23,10 +26,15 @@ interface Props {
 
 export default function RaceView({ race, predictions }: Props) {
   const [market, setMarket] = useState<MarketType>("race_winner");
+  const [showAll, setShowAll] = useState(false);
 
   const rows = predictions
     .filter((p) => p.market_type === market)
     .sort((a, b) => b.oracle_probability - a.oracle_probability);
+
+  const visibleRows = rows.filter((r) => r.oracle_probability >= VISIBLE_THRESHOLD);
+  const hiddenRows  = rows.filter((r) => r.oracle_probability <  VISIBLE_THRESHOLD);
+  const displayRows = showAll ? rows : visibleRows;
 
   const updatedAt = predictions[0]?.predicted_at
     ? new Date(predictions[0].predicted_at).toLocaleString("en-US", {
@@ -35,6 +43,12 @@ export default function RaceView({ race, predictions }: Props) {
     : null;
 
   const betsPlaced = rows.filter((r) => r.edge >= 0.05);
+
+  // Reset showAll when switching markets
+  const handleMarketChange = (m: MarketType) => {
+    setMarket(m);
+    setShowAll(false);
+  };
 
   const headerCell: React.CSSProperties = {
     fontSize: 10,
@@ -85,7 +99,7 @@ export default function RaceView({ race, predictions }: Props) {
           return (
             <button
               key={m.key}
-              onClick={() => setMarket(m.key)}
+              onClick={() => handleMarketChange(m.key)}
               style={{
                 padding: "7px 14px",
                 borderRadius: 999,
@@ -120,13 +134,13 @@ export default function RaceView({ race, predictions }: Props) {
                 </tr>
               </thead>
               <tbody>
-                {rows.map((row, i) => {
+                {displayRows.map((row, i) => {
                   const hasBet = row.edge >= 0.05;
                   const rowBg = hasBet ? "rgba(16,185,129,0.06)" : (i % 2 === 0 ? "#0A0A0A" : "#0C0C0E");
                   const abbrev = abbrevFromTicker(row.kalshi_ticker);
                   const showKalshi = row.kalshi_mid_price > 0 && row.kalshi_mid_price < 0.94;
                   return (
-                    <tr key={i} style={{ background: rowBg, borderBottom: "1px solid #15151A" }}>
+                    <tr key={row.kalshi_ticker} style={{ background: rowBg, borderBottom: "1px solid #15151A" }}>
                       <td style={{ padding: "16px 20px", color: "#52525B", fontSize: 12, fontFamily: MONO, textAlign: "center", borderLeft: hasBet ? "2px solid #10B981" : "2px solid transparent" }}>
                         {String(i + 1).padStart(2, "0")}
                       </td>
@@ -153,6 +167,29 @@ export default function RaceView({ race, predictions }: Props) {
                 })}
               </tbody>
             </table>
+
+            {/* Show more / collapse toggle */}
+            {hiddenRows.length > 0 && (
+              <button
+                onClick={() => setShowAll((v) => !v)}
+                style={{
+                  width: "100%",
+                  padding: "11px 20px",
+                  background: "transparent",
+                  border: "none",
+                  borderTop: "1px solid #1F1F23",
+                  color: "#52525B",
+                  fontSize: 12,
+                  cursor: "pointer",
+                  textAlign: "center",
+                  letterSpacing: "0.02em",
+                }}
+              >
+                {showAll
+                  ? `Hide ${hiddenRows.length} drivers with 0.0% probability`
+                  : `Show ${hiddenRows.length} more drivers (all 0.0% Oracle probability)`}
+              </button>
+            )}
           </SectionCard>
 
           {/* Legend */}

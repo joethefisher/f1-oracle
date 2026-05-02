@@ -42,7 +42,14 @@ export default function RaceView({ race, predictions }: Props) {
       })
     : null;
 
-  const betsPlaced = rows.filter((r) => r.edge >= 0.05);
+  // All bets across every market for the weekend summary card
+  const allWeekendBets = predictions
+    .filter((p) => p.edge >= 0.05)
+    .sort((a, b) => {
+      const marketOrder = { race_winner: 0, pole: 1, podium: 2 };
+      const mDiff = (marketOrder[a.market_type] ?? 9) - (marketOrder[b.market_type] ?? 9);
+      return mDiff !== 0 ? mDiff : b.edge - a.edge;
+    });
 
   // Reset showAll when switching markets
   const handleMarketChange = (m: MarketType) => {
@@ -80,15 +87,61 @@ export default function RaceView({ race, predictions }: Props) {
         {updatedAt && ` · Model updated ${updatedAt}`}
       </div>
 
-      {/* Bet summary strip */}
-      {betsPlaced.length > 0 && (
-        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", background: "rgba(16,185,129,0.06)", border: "1px solid rgba(16,185,129,0.25)", borderRadius: 8, marginBottom: 22 }}>
-          <BetBadge />
-          <span style={{ fontSize: 13, color: "#D4D4D8" }}>
-            Oracle placed{" "}
-            <span style={{ color: "#FAFAFA", fontWeight: 500 }}>{betsPlaced.length} bet{betsPlaced.length !== 1 ? "s" : ""}</span>
-            {" "}on this market (edge ≥ 5%)
-          </span>
+      {/* Weekend positions card */}
+      {allWeekendBets.length > 0 && (
+        <div style={{ background: "rgba(16,185,129,0.04)", border: "1px solid rgba(16,185,129,0.2)", borderRadius: 10, marginBottom: 24, overflow: "hidden" }}>
+          {/* Card header */}
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 18px", borderBottom: "1px solid rgba(16,185,129,0.15)" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <BetBadge />
+              <span style={{ fontSize: 13, fontWeight: 600, color: "#FAFAFA" }}>
+                Oracle's Weekend Positions
+              </span>
+            </div>
+            <span style={{ fontSize: 12, color: "#52525B", fontFamily: MONO }}>
+              {allWeekendBets.length} bet{allWeekendBets.length !== 1 ? "s" : ""} · edge ≥ 5%
+            </span>
+          </div>
+          {/* Bet rows */}
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead>
+              <tr>
+                <th style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.12em", color: "#52525B", fontWeight: 500, padding: "8px 18px", textAlign: "left", background: "rgba(0,0,0,0.2)" }}>Market</th>
+                <th style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.12em", color: "#52525B", fontWeight: 500, padding: "8px 18px", textAlign: "left", background: "rgba(0,0,0,0.2)" }}>Driver</th>
+                <th style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.12em", color: "#52525B", fontWeight: 500, padding: "8px 18px", textAlign: "right", background: "rgba(0,0,0,0.2)", width: 72 }}>Oracle</th>
+                <th style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.12em", color: "#52525B", fontWeight: 500, padding: "8px 18px", textAlign: "right", background: "rgba(0,0,0,0.2)", width: 72 }}>Kalshi</th>
+                <th style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.12em", color: "#52525B", fontWeight: 500, padding: "8px 18px", textAlign: "right", background: "rgba(0,0,0,0.2)", width: 80 }}>Edge</th>
+              </tr>
+            </thead>
+            <tbody>
+              {allWeekendBets.map((bet, i) => {
+                const abbrev = abbrevFromTicker(bet.kalshi_ticker);
+                const marketLabel = bet.market_type === "race_winner" ? "WIN" : bet.market_type === "podium" ? "PODIUM" : bet.market_type === "pole" ? "POLE" : "SPRINT";
+                return (
+                  <tr key={`${bet.kalshi_ticker}-${bet.market_type}`} style={{ borderTop: i > 0 ? "1px solid rgba(16,185,129,0.08)" : undefined }}>
+                    <td style={{ padding: "11px 18px" }}>
+                      <span style={{ fontSize: 10, fontWeight: 600, fontFamily: MONO, letterSpacing: "0.1em", color: "#34D399", background: "rgba(16,185,129,0.12)", padding: "3px 8px", borderRadius: 4 }}>
+                        {marketLabel}
+                      </span>
+                    </td>
+                    <td style={{ padding: "11px 18px" }}>
+                      <span style={{ fontFamily: MONO, fontWeight: 700, color: "#FAFAFA", fontSize: 13, letterSpacing: "0.04em", marginRight: 8 }}>{abbrev}</span>
+                      <span style={{ color: "#A1A1AA", fontSize: 13 }}>{bet.driver_name}</span>
+                    </td>
+                    <td style={{ padding: "11px 18px", fontFamily: MONO, fontSize: 12, color: "#FAFAFA", textAlign: "right" }}>
+                      {(bet.oracle_probability * 100).toFixed(1)}%
+                    </td>
+                    <td style={{ padding: "11px 18px", fontFamily: MONO, fontSize: 12, color: "#71717A", textAlign: "right" }}>
+                      {(bet.kalshi_mid_price * 100).toFixed(1)}%
+                    </td>
+                    <td style={{ padding: "11px 18px", textAlign: "right" }}>
+                      <Edge valuePct={bet.edge * 100} />
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
       )}
 

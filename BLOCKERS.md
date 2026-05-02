@@ -1,104 +1,83 @@
 # F1 Oracle — Blockers Requiring User Action
 
-Items I could not complete autonomously. Work through these in order and then let me know — I can continue building immediately.
+Items that cannot be completed autonomously. Work through these in order.
 
 ---
 
-## BLOCKER 1: Supabase setup (Required before any live data)
+## BLOCKER 1: Vercel deployment ✅ READY TO DEPLOY
 
 **What's needed:**
-1. Sign up at https://supabase.com and create a new project
-2. Copy the `DATABASE_URL` (PostgreSQL connection string) from Project Settings → Database → Connection string → URI
-3. Add it to `.env` in the project root:
+1. Go to https://vercel.com → New Project
+2. Import from GitHub: `joethefisher/f1-oracle`
+3. Set **Root Directory** to `web`
+4. Add these environment variables in Vercel dashboard (both from Supabase → Settings → API):
    ```
-   DATABASE_URL=postgresql://postgres:[password]@db.[project-ref].supabase.co:5432/postgres
+   NEXT_PUBLIC_SUPABASE_URL=https://goexgkwgaahdnolskmok.supabase.co
+   NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=<your publishable key>
    ```
-4. Run the DB schema: `source .venv/bin/activate && python tools/db_init.py`
-5. Verify tables created: `python tools/db_verify.py`
+5. Click Deploy — auto-detects Next.js, builds from `web/`
 
-**Why blocked:** All DB tools (`db_init.py`, `ingest_fastf1.py`, `save_markets.py`, `ingest_historical.py`) skip gracefully without `DATABASE_URL` but cannot actually write data.
+**Current state:** Next.js builds cleanly. Pages show empty states until predictions exist (expected).
+See `workflows/06_deploy_vercel.md` for full details.
 
 ---
 
-## BLOCKER 2: Vercel deployment (Required to go public)
+## BLOCKER 2: Wait for model training (In progress)
 
-**What's needed:**
-1. Go to https://vercel.com and import the GitHub repo `joethefisher/f1-oracle`
-2. Set the **Root Directory** to `web` in Vercel project settings
-3. Add these environment variables in Vercel dashboard:
-   ```
-   NEXT_PUBLIC_SUPABASE_URL=https://[project-ref].supabase.co
-   NEXT_PUBLIC_SUPABASE_ANON_KEY=[your-anon-key]
-   ```
-   Both are found in Supabase → Project Settings → API
-4. Deploy — Vercel will auto-detect Next.js and build correctly
-
-**Why blocked:** Vercel deployment requires your GitHub account auth and environment variable values I don't have.
-
----
-
-## BLOCKER 3: Historical data ingestion (Required before model can be trained)
-
-Once Supabase is connected (Blocker 1 resolved), run this in the terminal:
-
+Historical data ingestion is running now. Once complete (~30-40 min from start):
 ```bash
 source .venv/bin/activate
 
-# Ingest 2022-2024 race results (takes ~30 min due to FastF1 download)
-python tools/ingest_historical.py --seasons 2022 2023 2024 --session R
+# Train all models (race_winner, podium, pole)
+python -m tools.build_training_data
 
-# Ingest qualifying results for same seasons
-python tools/ingest_historical.py --seasons 2022 2023 2024 --session Q
+# Verify models saved
+ls -lh .tmp/models/
 ```
 
-**Why blocked:** FastF1 downloads large data files. Running this takes 20-40 minutes and requires active DB connection. Once done, tell me and I'll wire up the model training step.
+**Current state:** Race results for 2022-2024 being ingested. Qualifying results will run after. Model training script (`tools/build_training_data.py`) is written and tested.
 
 ---
 
-## BLOCKER 4: Model training (After Blocker 3)
+## BLOCKER 3: Kalshi market setup before first live race weekend
 
-Once historical data is ingested, I need to write `tools/build_training_data.py` that:
-1. Queries `race_results` + `qualifying_results` from DB
-2. Calls `build_race_features()` for each historical race
-3. Constructs training labels (won=1/0 per race winner per driver)
-4. Calls `train_market_model()` and saves models to `.tmp/models/`
+Before the first race weekend prediction run, you'll need Kalshi event tickers for the race. These look like `KXF1RACE-MIAGP26` (Miami 2026). To find them:
+```bash
+source .venv/bin/activate
+python -m tools.explore_markets --search "F1"
+```
 
-This is a 1-hour build task I can do as soon as you tell me the data is in the DB.
+Then:
+```bash
+# Save markets for the race
+python -m tools.save_markets --race-id <ID> --event <TICKER> --type race_winner
+python -m tools.save_markets --race-id <ID> --event <TICKER> --type podium
+python -m tools.save_markets --race-id <ID> --event <TICKER> --type pole
+```
 
----
-
-## BLOCKER 5: Live Kalshi market prices in frontend (Tab 1)
-
-Tab 1 currently shows mock data. To show live Oracle vs Kalshi:
-1. After Supabase is set up, I'll add a Supabase query in `/web/app/race/page.tsx`
-2. The query reads `predictions` joined to `markets` for the active race
-3. Kalshi live prices need a periodic refresh — I recommend a cron job running `tools/snapshot_orderbook.py` before each race and storing prices in a `price_snapshots` table
-
-This is ready to build as soon as Blockers 1–3 are resolved.
+See `workflows/05_race_weekend.md` for the full race weekend cycle.
 
 ---
 
-## BLOCKER 6: Make GitHub repo public (Phase 6)
+## BLOCKER 4: Make GitHub repo public (Phase 6 — shadow mode first)
 
 The repo at https://github.com/joethefisher/f1-oracle is currently **private**.
-
-To make it public:
-1. Go to the repo on GitHub
-2. Settings → Danger Zone → Change repository visibility → Make public
-
-Wait until you've done a few shadow-mode race weekends (Phase 5) before going public.
+Go public after 2-3 shadow mode race weekends to validate predictions look reasonable.
 
 ---
 
-## Summary: What's done vs blocked
+## Summary: What's done vs what's next
 
-| Phase | Status | Notes |
-|-------|--------|-------|
-| Phase 1 — Foundation | ✅ Complete | DB schema, FastF1 ingestion, Kalshi market tools |
-| Phase 2 — Prediction Model | ✅ Complete | Feature engineering, LogReg, backtest — needs data to train |
-| Phase 3 — Portfolio Engine | ✅ Complete | Half-Kelly bets, settlement, portfolio snapshots |
-| Phase 4 — Frontend | ✅ Complete | 3-tab site builds, dark theme, mock data wired |
-| Phase 5 — Shadow Mode | 🔒 Blocked | Needs Supabase (B1) + historical data (B3) + model training (B4) |
-| Phase 6 — Launch | 🔒 Blocked | Needs Vercel deploy (B2) + public repo (B6) |
+| Item | Status |
+|------|--------|
+| DB schema + Supabase | ✅ Connected |
+| Race results 2022-2024 | 🔄 Ingesting (in progress) |
+| Qualifying results 2022-2024 | 🔄 Queued after race results |
+| Model training script | ✅ Written + tested |
+| Frontend (3 tabs, live Supabase queries) | ✅ Complete |
+| Vercel config | ✅ Ready — needs your deploy |
+| Race weekend workflow | ✅ Documented |
+| Shadow mode (first predictions) | ⏳ After model training + Kalshi markets |
+| Launch | ⏳ After 2-3 shadow weekends |
 
-**80 Python tests passing. Next.js build passing.**
+**102 Python tests passing. TypeScript build clean.**

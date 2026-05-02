@@ -32,25 +32,29 @@ def compute_return_pct(starting: float, current: float) -> float:
     return round((current - starting) / starting * 100.0, 4)
 
 
-def compute_kalshi_baseline(
-    markets: list[dict],
-    bankroll: float,
+def compute_kalshi_baseline_pnl(
+    bets: list[dict],
     oracle_total_bet: float,
-) -> list[dict]:
+) -> float:
     """
-    Spread oracle_total_bet proportionally across all markets by their Kalshi mid-price.
-    Returns list of {"kalshi_mid": float, "bet_size": float} records.
+    Compute P&L for a bettor who spreads oracle_total_bet proportionally
+    by Kalshi mid-price and resolves at actual outcomes.
+    bets: [{"kalshi_mid": float, "won": bool}]
     """
-    total_price = sum(m["kalshi_mid"] for m in markets)
-    if total_price == 0:
-        return [{"kalshi_mid": m["kalshi_mid"], "bet_size": 0.0} for m in markets]
-    return [
-        {
-            "kalshi_mid": m["kalshi_mid"],
-            "bet_size": round(m["kalshi_mid"] / total_price * oracle_total_bet, 2),
-        }
-        for m in markets
-    ]
+    total_price = sum(b["kalshi_mid"] for b in bets if b["kalshi_mid"] > 0)
+    if total_price == 0 or oracle_total_bet == 0:
+        return 0.0
+    pnl = 0.0
+    for bet in bets:
+        mid = bet["kalshi_mid"]
+        if mid <= 0:
+            continue
+        size = round(mid / total_price * oracle_total_bet, 2)
+        if bet["won"]:
+            pnl += size * (1.0 / mid - 1.0)
+        else:
+            pnl -= size
+    return round(pnl, 2)
 
 
 def save_snapshot(race_id: int, bankroll: float, return_pct: float, kalshi_baseline: float):
@@ -109,15 +113,9 @@ def compute_and_save(race_id: int):
     new_bankroll = apply_settled_bets(bankroll, bets)
     return_pct = compute_return_pct(STARTING_BANKROLL, new_bankroll)
 
-    # Kalshi baseline: spread oracle_total_bet by kalshi_mid proportions
-    markets = [{"kalshi_mid": b["kalshi_mid"]} for b in bets]
-    baseline_bets = compute_kalshi_baseline(markets, bankroll, oracle_total_bet)
-    baseline_value = bankroll
-    for bb in baseline_bets:
-        if bb["bet_size"] <= 0:
-            continue
-        # Assume kalshi_mid bet resolves to payout based on market price
-        baseline_value += bb["bet_size"] * (1.0 / bb["kalshi_mid"] - 1.0) * 0.5  # ~50% hit rate
+    # Kalshi baseline: spread oracle_total_bet proportionally by kalshi_mid, use actual outcomes
+    baseline_pnl = compute_kalshi_baseline_pnl(bets, oracle_total_bet)
+    baseline_value = bankroll + baseline_pnl
 
     save_snapshot(race_id, new_bankroll, return_pct, round(baseline_value, 2))
     console.print(f"[green]Portfolio updated: ${bankroll:.2f} → ${new_bankroll:.2f} ({return_pct:+.2f}%)[/]")

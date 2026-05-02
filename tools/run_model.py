@@ -141,7 +141,7 @@ def get_kalshi_mids(race_id: int, market_type: str) -> dict:
     """Returns {market_id: kalshi_mid_price} from most recent orderbook snapshots."""
     with cursor() as cur:
         cur.execute("""
-            SELECT DISTINCT ON (m.id) m.id, s.best_yes_ask, s.best_no_ask
+            SELECT DISTINCT ON (m.id) m.id, s.best_yes_bid, s.best_yes_ask
             FROM markets m
             JOIN orderbook_snapshots s ON s.market_id = m.id
             WHERE m.race_id = %s AND m.market_type = %s
@@ -150,12 +150,13 @@ def get_kalshi_mids(race_id: int, market_type: str) -> dict:
         rows = cur.fetchall()
 
     mids = {}
-    for market_id, yes_ask, no_ask in rows:
-        if yes_ask is not None and no_ask is not None:
-            yes_bid = 1.0 - float(no_ask)
-            mids[market_id] = (yes_bid + float(yes_ask)) / 2
+    for market_id, yes_bid, yes_ask in rows:
+        if yes_bid is not None and yes_ask is not None:
+            mids[market_id] = (float(yes_bid) + float(yes_ask)) / 2
         elif yes_ask is not None:
             mids[market_id] = float(yes_ask)
+        elif yes_bid is not None:
+            mids[market_id] = float(yes_bid)
     return mids
 
 

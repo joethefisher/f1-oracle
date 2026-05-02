@@ -64,14 +64,33 @@ def save_markets(race_id: int, event_ticker: str, market_type: str):
 
 def main():
     parser = argparse.ArgumentParser(description="Save Kalshi markets to DB")
-    parser.add_argument("--race-id", type=int, required=True)
+    id_group = parser.add_mutually_exclusive_group(required=True)
+    id_group.add_argument("--race-id", type=int)
+    id_group.add_argument("--season", type=int)
+    parser.add_argument("--round", type=int, dest="round_num")
     parser.add_argument("--event", required=True, help="Kalshi event ticker")
     parser.add_argument(
         "--type", required=True, dest="market_type",
         choices=["race_winner", "sprint_winner", "podium", "pole", "constructors"],
     )
     args = parser.parse_args()
-    save_markets(args.race_id, args.event, args.market_type)
+
+    if args.race_id:
+        race_id = args.race_id
+    else:
+        if not args.round_num:
+            parser.error("--round is required when using --season")
+        with cursor() as cur:
+            cur.execute(
+                "SELECT id FROM races WHERE season = %s AND round = %s",
+                (args.season, args.round_num),
+            )
+            row = cur.fetchone()
+        if not row:
+            raise ValueError(f"No race found for {args.season} R{args.round_num}. Run setup_race first.")
+        race_id = row[0]
+
+    save_markets(race_id, args.event, args.market_type)
 
 
 if __name__ == "__main__":

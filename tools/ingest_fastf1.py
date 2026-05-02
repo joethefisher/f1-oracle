@@ -2,10 +2,10 @@
 Ingest F1 session data from FastF1 into the database.
 
 Usage:
-    python tools/ingest_fastf1.py --season 2026 --round 6 --session R
-    python tools/ingest_fastf1.py --season 2026 --round 6 --session Q
+    python -m tools.ingest_fastf1 --season 2026 --round 6 --session R
+    python -m tools.ingest_fastf1 --season 2026 --round 6 --session Q
 
-Sessions: R=Race, Q=Qualifying, S=Sprint, SQ=Sprint Qualifying
+Sessions: R=Race, Q=Qualifying, S=Sprint
 """
 
 import argparse
@@ -33,30 +33,101 @@ def get_circuit(session) -> str:
     return str(session.event.get("Location", "Unknown"))
 
 
-def parse_results(session, season: int, round_num: int, session_type: str = "R") -> list[dict[str, Any]]:
+def _build_driver_info(session) -> dict:
+    """Build {abbreviation: {driver_number, full_name, team_name}} from session.results."""
+    info = {}
+    for _, row in session.results.iterrows():
+        abbrev = str(row.get("Abbreviation", ""))
+        if abbrev:
+            info[abbrev] = {
+                "driver_number": str(row.get("DriverNumber", "")),
+                "full_name": str(row.get("FullName", "")),
+                "team_name": str(row.get("TeamName", "")),
+                "status": str(row.get("Status", "")),
+                "points": float(row["Points"]) if "Points" in row.index and pd.notna(row.get("Points")) else None,
+            }
+    return info
+
+
+def parse_results_race(session, season: int, round_num: int) -> list[dict[str, Any]]:
+    """Extract race results using lap data for positions (Ergast fallback is unavailable)."""
+    laps = session.laps
+    driver_info = _build_driver_info(session)
+
+    # Grid: position at first lap; Finish: position at last lap
+    first_laps = (
+        laps[laps["LapNumber"] == 1][["Driver", "Position"]]
+        .rename(columns={"Position": "GridPosition"})
+        .drop_duplicates("Driver")
+        .set_index("Driver")
+    )
+    last_laps = (
+        laps.sort_values("LapNumber", ascending=False)
+        .drop_duplicates("Driver")[["Driver", "Position"]]
+        .rename(columns={"Position": "FinishPosition"})
+        .set_index("Driver")
+    )
+
+    combined = first_laps.join(last_laps, how="outer")
+
     rows = []
-    for _, driver in session.results.iterrows():
-        row: dict[str, Any] = {
+    for abbrev, d in driver_info.items():
+        grid = combined.loc[abbrev, "GridPosition"] if abbrev in combined.index else None
+        finish = combined.loc[abbrev, "FinishPosition"] if abbrev in combined.index else None
+        rows.append({
             "season": season,
             "round": round_num,
-            "session_type": session_type,
-            "driver_number": str(driver.get("DriverNumber", "")),
-            "abbreviation": str(driver.get("Abbreviation", "")),
-            "driver_name": str(driver.get("FullName", "")),
-            "team_name": str(driver.get("TeamName", "")),
-            "position": int(driver["Position"]) if pd.notna(driver.get("Position")) else None,
-            "grid_position": int(driver["GridPosition"]) if pd.notna(driver.get("GridPosition")) else None,
-            "status": str(driver.get("Status", "")),
-            "points": float(driver["Points"]) if "Points" in driver.index and pd.notna(driver.get("Points")) else None,
-        }
-        rows.append(row)
+            "session_type": "R",
+            "driver_number": d["driver_number"],
+            "abbreviation": abbrev,
+            "driver_name": d["full_name"],
+            "team_name": d["team_name"],
+            "position": int(finish) if pd.notna(finish) else None,
+            "grid_position": int(grid) if pd.notna(grid) else None,
+            "status": d["status"],
+            "points": d["points"],
+        })
+    return rows
+
+
+def parse_results_qualifying(session, season: int, round_num: int) -> list[dict[str, Any]]:
+    """Extract qualifying results using best lap time ranking."""
+    laps = session.laps
+    driver_info = _build_driver_info(session)
+
+    best_times = (
+        laps.groupby("Driver")["LapTime"]
+        .min()
+        .dropna()
+        .sort_values()
+        .reset_index()
+    )
+    best_times["quali_position"] = range(1, len(best_times) + 1)
+    position_map = dict(zip(best_times["Driver"], best_times["quali_position"]))
+
+    rows = []
+    for abbrev, d in driver_info.items():
+        pos = position_map.get(abbrev)
+        rows.append({
+            "season": season,
+            "round": round_num,
+            "session_type": "Q",
+            "driver_number": d["driver_number"],
+            "abbreviation": abbrev,
+            "driver_name": d["full_name"],
+            "team_name": d["team_name"],
+            "position": pos,
+            "grid_position": pos,
+            "status": d["status"],
+            "points": d["points"],
+        })
     return rows
 
 
 def load_session(season: int, round_num: int, session_type: str):
     console.print(f"Loading FastF1: season={season} round={round_num} session={session_type}")
     session = fastf1.get_session(season, round_num, session_type)
-    session.load(telemetry=False, weather=False, messages=False)
+    session.load(telemetry=False, weather=False, messages=False, laps=True)
     return session
 
 
@@ -102,12 +173,46 @@ def upsert_results(rows: list[dict], race_id: int, session_type: str):
     console.print(f"[green]Upserted {len(rows)} rows into {table}[/]")
 
 
+def _laps_available(session) -> bool:
+    try:
+        _ = session.laps
+        return True
+    except Exception:
+        return False
+
+
 def ingest(season: int, round_num: int, session_type: str = "R"):
+    from tools.jolpica import fetch_race_results, fetch_qualifying_results
+
     session = load_session(season, round_num, session_type)
-    rows = parse_results(session, season, round_num, session_type)
+
+    if session_type == "R":
+        if _laps_available(session):
+            rows = parse_results_race(session, season, round_num)
+        else:
+            console.print(f"[yellow]Lap data unavailable, falling back to Jolpica[/]")
+            jolpica_rows = fetch_race_results(season, round_num)
+            rows = [
+                {**r, "season": season, "round": round_num, "session_type": "R"}
+                for r in jolpica_rows
+            ]
+    elif session_type in ("Q", "SQ"):
+        if _laps_available(session):
+            rows = parse_results_qualifying(session, season, round_num)
+        else:
+            console.print(f"[yellow]Lap data unavailable, falling back to Jolpica[/]")
+            jolpica_rows = fetch_qualifying_results(season, round_num)
+            rows = [
+                {**r, "season": season, "round": round_num, "session_type": "Q"}
+                for r in jolpica_rows
+            ]
+    else:
+        rows = parse_results_race(session, season, round_num)
+
     race_id = upsert_race(season, round_num, session)
     upsert_results(rows, race_id, session_type)
-    console.print(f"[green]Ingested {season} R{round_num} ({session_type}) — {len(rows)} drivers[/]")
+    n_with_pos = sum(1 for r in rows if r["position"] is not None)
+    console.print(f"[green]Ingested {season} R{round_num} ({session_type}) — {len(rows)} drivers, {n_with_pos} with position[/]")
 
 
 def main():

@@ -1,95 +1,139 @@
 import { getPortfolioSnapshots } from "@/lib/queries";
 import PortfolioChart from "./PortfolioChart";
+import { StatCard, SectionCard } from "@/app/components/ui";
 
 export const revalidate = 300;
 
 const STARTING = 1000.0;
+const MONO = "var(--font-geist-mono), ui-monospace, monospace";
 
 export default async function PortfolioPage() {
   const snapshots = await getPortfolioSnapshots();
 
   const latest = snapshots[snapshots.length - 1];
-  const returnPct = latest
-    ? ((latest.bankroll_after - STARTING) / STARTING) * 100
-    : 0;
+  const portfolioValue = latest?.bankroll_after ?? STARTING;
+  const returnPct = ((portfolioValue - STARTING) / STARTING) * 100;
   const baselineReturn = latest
     ? ((latest.kalshi_baseline_value - STARTING) / STARTING) * 100
     : 0;
 
+  const headerCell: React.CSSProperties = {
+    fontSize: 10,
+    textTransform: "uppercase",
+    letterSpacing: "0.14em",
+    color: "#71717A",
+    fontWeight: 500,
+    padding: "12px 20px",
+    background: "#131316",
+    borderBottom: "1px solid #1F1F23",
+    textAlign: "left",
+  };
+
   return (
-    <div className="space-y-6">
-      <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-        <div className="col-span-2 sm:col-span-1 rounded-lg border border-zinc-800 bg-zinc-900 p-4">
-          <div className="text-zinc-400 text-xs uppercase tracking-wide mb-1">Portfolio Value</div>
-          <div className="text-3xl font-semibold text-white">
-            ${latest?.bankroll_after.toFixed(2) ?? "1,000.00"}
-          </div>
-        </div>
-        <div className="rounded-lg border border-zinc-800 bg-zinc-900 p-4">
-          <div className="text-zinc-400 text-xs uppercase tracking-wide mb-1">Oracle Return</div>
-          <div className={`text-2xl font-semibold ${returnPct >= 0 ? "text-emerald-400" : "text-red-400"}`}>
-            {returnPct >= 0 ? "+" : ""}{returnPct.toFixed(2)}%
-          </div>
-        </div>
-        <div className="rounded-lg border border-zinc-800 bg-zinc-900 p-4">
-          <div className="text-zinc-400 text-xs uppercase tracking-wide mb-1">Kalshi Avg Return</div>
-          <div className={`text-2xl font-semibold ${baselineReturn >= 0 ? "text-emerald-400" : "text-red-400"}`}>
-            {baselineReturn >= 0 ? "+" : ""}{baselineReturn.toFixed(2)}%
-          </div>
-        </div>
-        <div className="rounded-lg border border-zinc-800 bg-zinc-900 p-4">
-          <div className="text-zinc-400 text-xs uppercase tracking-wide mb-1">Races Played</div>
-          <div className="text-2xl font-semibold text-white">{snapshots.length}</div>
-        </div>
+    <div>
+      {/* Header */}
+      <h1 style={{ fontSize: 32, fontWeight: 600, letterSpacing: "-0.025em", margin: 0, color: "#FAFAFA", marginBottom: 6 }}>
+        Portfolio
+      </h1>
+      <div style={{ fontSize: 13, color: "#71717A", marginBottom: 22 }}>
+        Virtual $1,000 starting bankroll · Kelly-fractional sizing · No real money
+      </div>
+
+      {/* Stat cards */}
+      <div style={{ display: "flex", gap: 14, marginBottom: 22 }}>
+        <StatCard
+          label="Portfolio Value"
+          value={`$${portfolioValue.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+          sub="Started at $1,000.00"
+          style={{ flex: "0 0 32%" }}
+        />
+        <StatCard
+          label="Oracle Return"
+          value={`${returnPct >= 0 ? "+" : ""}${returnPct.toFixed(2)}%`}
+          valueColor={returnPct >= 0 ? "#34D399" : "#F87171"}
+          sub={`vs Kalshi avg ${baselineReturn >= 0 ? "+" : ""}${baselineReturn.toFixed(2)}%`}
+        />
+        <StatCard
+          label="Kalshi Avg Return"
+          value={`${baselineReturn >= 0 ? "+" : ""}${baselineReturn.toFixed(2)}%`}
+          valueColor={baselineReturn >= 0 ? "#34D399" : "#F87171"}
+          sub="Crowd-weighted baseline"
+        />
+        <StatCard
+          label="Races Played"
+          value={String(snapshots.length)}
+          sub="of 24 in 2026 season"
+        />
       </div>
 
       {snapshots.length === 0 ? (
-        <div className="rounded-lg border border-zinc-800 p-8 text-center text-zinc-500 text-sm">
+        <div style={{ background: "#0E0E10", border: "1px solid #1F1F23", borderRadius: 8, padding: "32px 20px", textAlign: "center", color: "#71717A", fontSize: 14 }}>
           Portfolio history will appear here after the first settled race.
         </div>
       ) : (
         <>
-          <div className="rounded-lg border border-zinc-800 bg-zinc-900 p-4">
-            <h2 className="text-sm font-medium text-zinc-400 mb-4 uppercase tracking-wide">
-              Portfolio vs Kalshi Average
-            </h2>
+          {/* Chart card */}
+          <SectionCard style={{ marginBottom: 22, padding: "20px 0 8px" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", padding: "0 24px 12px" }}>
+              <div>
+                <div style={{ fontSize: 14, fontWeight: 500, color: "#FAFAFA", marginBottom: 4 }}>Cumulative performance</div>
+                <div style={{ fontSize: 12, color: "#71717A" }}>$ value across the 2026 season</div>
+              </div>
+              <div style={{ display: "flex", gap: 18, fontSize: 12, alignItems: "center" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+                  <span style={{ width: 14, height: 2, background: "#E8002D", display: "inline-block" }} />
+                  <span style={{ color: "#D4D4D8" }}>Oracle</span>
+                  <span style={{ color: "#71717A", fontFamily: MONO }}>${portfolioValue.toFixed(2)}</span>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+                  <span style={{ width: 14, height: 0, border: "1px dashed #71717A", display: "inline-block" }} />
+                  <span style={{ color: "#D4D4D8" }}>Kalshi avg</span>
+                  <span style={{ color: "#71717A", fontFamily: MONO }}>${(latest?.kalshi_baseline_value ?? STARTING).toFixed(2)}</span>
+                </div>
+              </div>
+            </div>
             <PortfolioChart snapshots={snapshots} />
-          </div>
+          </SectionCard>
 
-          <div className="rounded-lg border border-zinc-800 overflow-hidden">
-            <table className="w-full text-sm">
-              <thead className="bg-zinc-900 text-zinc-400 text-xs uppercase tracking-wide">
+          {/* History table */}
+          <SectionCard>
+            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+              <thead>
                 <tr>
-                  <th className="text-left px-4 py-3">Race</th>
-                  <th className="text-right px-4 py-3">Oracle Portfolio</th>
-                  <th className="text-right px-4 py-3">Oracle Return</th>
-                  <th className="text-right px-4 py-3">Kalshi Avg</th>
+                  <th style={headerCell}>Race</th>
+                  <th style={{ ...headerCell, textAlign: "right" }}>Oracle Portfolio</th>
+                  <th style={{ ...headerCell, textAlign: "right" }}>Race Return</th>
+                  <th style={{ ...headerCell, textAlign: "right" }}>Kalshi Avg</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-zinc-800">
-                {[...snapshots].reverse().map((snap) => (
-                  <tr key={snap.id} className="bg-zinc-950 hover:bg-zinc-900 transition-colors">
-                    <td className="px-4 py-3 text-white">{snap.race_name}</td>
-                    <td className="px-4 py-3 text-right font-medium text-white">
+              <tbody>
+                {[...snapshots].reverse().map((snap, i, arr) => (
+                  <tr key={snap.id} style={{ borderBottom: i === arr.length - 1 ? "none" : "1px solid #15151A", background: i % 2 === 0 ? "#0A0A0A" : "#0C0C0E" }}>
+                    <td style={{ padding: "14px 20px" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                        <span style={{ color: "#FAFAFA", fontSize: 14 }}>
+                          {snap.race_name.replace(" Grand Prix", " GP")}
+                        </span>
+                      </div>
+                    </td>
+                    <td style={{ padding: "14px 20px", textAlign: "right", color: "#FAFAFA", fontFamily: MONO, fontSize: 13, fontVariantNumeric: "tabular-nums" }}>
                       ${snap.bankroll_after.toFixed(2)}
                     </td>
-                    <td className={`px-4 py-3 text-right font-medium ${snap.return_pct >= 0 ? "text-emerald-400" : "text-red-400"}`}>
-                      {snap.return_pct >= 0 ? "+" : ""}{snap.return_pct.toFixed(2)}%
+                    <td style={{ padding: "14px 20px", textAlign: "right" }}>
+                      <span style={{ color: snap.return_pct >= 0 ? "#34D399" : "#F87171", fontFamily: MONO, fontSize: 13, fontWeight: 600, fontVariantNumeric: "tabular-nums" }}>
+                        {snap.return_pct >= 0 ? "+" : ""}{snap.return_pct.toFixed(2)}%
+                      </span>
                     </td>
-                    <td className="px-4 py-3 text-right text-zinc-400">
+                    <td style={{ padding: "14px 20px", textAlign: "right", color: "#71717A", fontFamily: MONO, fontSize: 13, fontVariantNumeric: "tabular-nums" }}>
                       ${snap.kalshi_baseline_value.toFixed(2)}
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
-          </div>
+          </SectionCard>
         </>
       )}
-
-      <p className="text-xs text-zinc-600">
-        Oracle starts with $1,000 virtual bankroll. Kalshi Avg baseline spreads the same dollar amount proportional to market prices.
-      </p>
     </div>
   );
 }

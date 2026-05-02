@@ -85,6 +85,7 @@ def check_upcoming():
             ORDER BY race_date_utc NULLS LAST
             LIMIT 5
         """)
+        # Note: upcoming races may have dates in the future
         rows = cur.fetchall()
 
     if not rows:

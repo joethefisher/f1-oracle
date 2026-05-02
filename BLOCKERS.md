@@ -1,83 +1,95 @@
-# F1 Oracle — Blockers Requiring User Action
+# F1 Oracle — Action Items
 
-Items that cannot be completed autonomously. Work through these in order.
+**Today is 2026-05-02. Miami GP 2026 is TOMORROW (May 3).**
 
 ---
 
-## BLOCKER 1: Vercel deployment ✅ READY TO DEPLOY
+## IMMEDIATE: Shadow Mode — Miami GP 2026
 
-**What's needed:**
+### 1. Set up Vercel (30 min)
+Required before the site can be viewed publicly.
+
 1. Go to https://vercel.com → New Project
-2. Import from GitHub: `joethefisher/f1-oracle`
-3. Set **Root Directory** to `web`
-4. Add these environment variables in Vercel dashboard (both from Supabase → Settings → API):
+2. Import: `joethefisher/f1-oracle`
+3. Root Directory: `web`
+4. Add env vars (from Supabase → Settings → API):
    ```
    NEXT_PUBLIC_SUPABASE_URL=https://goexgkwgaahdnolskmok.supabase.co
    NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=<your publishable key>
    ```
-5. Click Deploy — auto-detects Next.js, builds from `web/`
+5. Deploy
 
-**Current state:** Next.js builds cleanly. Pages show empty states until predictions exist (expected).
-See `workflows/06_deploy_vercel.md` for full details.
+### 2. Find Kalshi event tickers for Miami GP
+Run:
+```bash
+source .venv/bin/activate
+python -m tools.explore_markets
+```
 
----
+Look for event tickers for Miami 2026 race winner, podium, pole markets.
+They'll look like `KXF1RACE-MIAGP26`.
 
-## BLOCKER 2: Wait for model training (In progress)
-
-Historical data ingestion is running now. Once complete (~30-40 min from start):
+### 3. After qualifying Saturday: run first shadow mode prediction
 ```bash
 source .venv/bin/activate
 
-# Train all models (race_winner, podium, pole)
-python -m tools.build_training_data
+# Ingest qualifying results
+python -m tools.ingest_fastf1 --season 2026 --round 4 --session Q
 
-# Verify models saved
-ls -lh .tmp/models/
+# Snapshot Kalshi prices
+python -m tools.snapshot_orderbook --event KXF1RACE-MIAGP26
+python -m tools.save_orderbook_to_db   # saves latest snapshot to DB
+
+# Save market structure
+python -m tools.save_markets --season 2026 --round 4 --event KXF1RACE-MIAGP26 --type race_winner
+python -m tools.save_markets --season 2026 --round 4 --event KXF1RACEPODIUM-MIAGP26 --type podium
+python -m tools.save_markets --season 2026 --round 4 --event KXF1POLE-MIAGP26 --type pole
+
+# Run model + place virtual bets
+python -m tools.run_model --season 2026 --round 4
 ```
 
-**Current state:** Race results for 2022-2024 being ingested. Qualifying results will run after. Model training script (`tools/build_training_data.py`) is written and tested.
+### 4. After race Sunday: settle and update portfolio
+```bash
+python -m tools.ingest_fastf1 --season 2026 --round 4 --session R
+python -m tools.settle_outcomes --season 2026 --round 4
+python -m tools.update_portfolio --season 2026 --round 4
+```
 
 ---
 
-## BLOCKER 3: Kalshi market setup before first live race weekend
+## ONCE QUALIFYING INGESTION COMPLETES: Retrain pole model
 
-Before the first race weekend prediction run, you'll need Kalshi event tickers for the race. These look like `KXF1RACE-MIAGP26` (Miami 2026). To find them:
+Qualifying ingestion is running now (ETA ~30 min). After:
 ```bash
 source .venv/bin/activate
-python -m tools.explore_markets --search "F1"
+python -m tools.build_training_data --market-type pole
 ```
-
-Then:
-```bash
-# Save markets for the race
-python -m tools.save_markets --race-id <ID> --event <TICKER> --type race_winner
-python -m tools.save_markets --race-id <ID> --event <TICKER> --type podium
-python -m tools.save_markets --race-id <ID> --event <TICKER> --type pole
-```
-
-See `workflows/05_race_weekend.md` for the full race weekend cycle.
 
 ---
 
-## BLOCKER 4: Make GitHub repo public (Phase 6 — shadow mode first)
+## Ongoing Blockers
 
-The repo at https://github.com/joethefisher/f1-oracle is currently **private**.
-Go public after 2-3 shadow mode race weekends to validate predictions look reasonable.
+| Item | Status | Action |
+|------|--------|--------|
+| Vercel deploy | ⚠️ Needs your GitHub auth | See step 1 above |
+| Miami Kalshi tickers | ⚠️ Needs manual lookup | Run `explore_markets` |
+| Pole model | 🔄 Waiting for quali data | Auto-trains after quali |
+| Make repo public | ⏳ After 2-3 shadow weekends | GitHub Settings → Visibility |
 
 ---
 
-## Summary: What's done vs what's next
+## System State (as of 2026-05-02)
 
 | Item | Status |
 |------|--------|
-| DB schema + Supabase | ✅ Connected |
-| Race results 2022-2024 | 🔄 Ingesting (in progress) |
-| Qualifying results 2022-2024 | 🔄 Queued after race results |
-| Model training script | ✅ Written + tested |
-| Frontend (3 tabs, live Supabase queries) | ✅ Complete |
-| Vercel config | ✅ Ready — needs your deploy |
-| Race weekend workflow | ✅ Documented |
-| Shadow mode (first predictions) | ⏳ After model training + Kalshi markets |
-| Launch | ⏳ After 2-3 shadow weekends |
+| DB: Race results 2022-2024 | ✅ 1,336 rows, all with position |
+| DB: Qualifying 2022-2024 | 🔄 Ingesting (~42/68 complete) |
+| DB: 2025 season (24 races) | ✅ Loaded (all completed) |
+| DB: 2026 season (22 races) | ✅ Loaded, Miami marked active |
+| Models: race_winner + podium | ✅ Trained on 66 races |
+| Models: pole | ⏳ Trains after qualifying data loads |
+| Frontend (3 tabs) | ✅ Live Supabase queries, empty states |
+| Vercel config | ✅ web/vercel.json ready |
 
 **102 Python tests passing. TypeScript build clean.**

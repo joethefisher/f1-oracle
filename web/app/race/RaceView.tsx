@@ -46,10 +46,25 @@ export default function RaceView({ race, predictions }: Props) {
   const allWeekendBets = predictions
     .filter((p) => p.edge >= 0.05)
     .sort((a, b) => {
-      const marketOrder = { race_winner: 0, pole: 1, podium: 2 };
+      const marketOrder: Partial<Record<MarketType, number>> = { race_winner: 0, pole: 1, podium: 2 };
       const mDiff = (marketOrder[a.market_type] ?? 9) - (marketOrder[b.market_type] ?? 9);
       return mDiff !== 0 ? mDiff : b.edge - a.edge;
     });
+
+  // Bet counts per market tab
+  const betCountByMarket: Partial<Record<MarketType, number>> = {};
+  for (const p of predictions) {
+    if (p.edge >= 0.05) betCountByMarket[p.market_type] = (betCountByMarket[p.market_type] ?? 0) + 1;
+  }
+
+  // Context-aware status label based on race date
+  const raceDate = new Date(race.race_date_utc);
+  const now = new Date();
+  const daysUntilRace = Math.ceil((raceDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+  const statusLabel =
+    daysUntilRace <= 0 ? "RACE DAY · MODEL v0.4" :
+    daysUntilRace === 1 ? "RACE TOMORROW · MODEL v0.4" :
+    `RACE IN ${daysUntilRace}D · MODEL v0.4`;
 
   // Reset showAll when switching markets
   const handleMarketChange = (m: MarketType) => {
@@ -76,14 +91,15 @@ export default function RaceView({ race, predictions }: Props) {
         <h1 style={{ fontSize: 32, fontWeight: 600, letterSpacing: "-0.025em", margin: 0, color: "#FAFAFA" }}>
           {race.name}
         </h1>
-        <div style={{ fontSize: 12, color: "#52525B", fontFamily: MONO }}>
-          LIVE · MODEL v0.4
+        <div style={{ fontSize: 12, color: daysUntilRace <= 1 ? "#E8002D" : "#52525B", fontFamily: MONO }}>
+          {statusLabel}
         </div>
       </div>
 
       {/* Subtitle */}
       <div style={{ fontSize: 13, color: "#71717A", marginBottom: 20 }}>
-        Round {race.round} · {race.circuit}
+        Round {race.round} · {race.circuit} · Race{" "}
+        {new Date(race.race_date_utc).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
         {updatedAt && ` · Model updated ${updatedAt}`}
       </div>
 
@@ -154,6 +170,7 @@ export default function RaceView({ race, predictions }: Props) {
               key={m.key}
               onClick={() => handleMarketChange(m.key)}
               style={{
+                display: "flex", alignItems: "center", gap: 7,
                 padding: "7px 14px",
                 borderRadius: 999,
                 fontSize: 13,
@@ -165,6 +182,20 @@ export default function RaceView({ race, predictions }: Props) {
               }}
             >
               {m.label}
+              {(betCountByMarket[m.key] ?? 0) > 0 && (
+                <span style={{
+                  fontSize: 10,
+                  fontWeight: 700,
+                  fontFamily: MONO,
+                  background: active ? "rgba(255,255,255,0.25)" : "rgba(16,185,129,0.2)",
+                  color: active ? "#fff" : "#34D399",
+                  borderRadius: 999,
+                  padding: "1px 6px",
+                  lineHeight: "1.4",
+                }}>
+                  {betCountByMarket[m.key]}
+                </span>
+              )}
             </button>
           );
         })}

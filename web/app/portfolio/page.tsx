@@ -1,4 +1,4 @@
-import { getPortfolioSnapshots } from "@/lib/queries";
+import { getPortfolioSnapshots, getActiveRace } from "@/lib/queries";
 import PortfolioChart from "./PortfolioChart";
 import { StatCard, SectionCard } from "@/app/components/ui";
 
@@ -8,7 +8,10 @@ const STARTING = 1000.0;
 const MONO = "var(--font-geist-mono), ui-monospace, monospace";
 
 export default async function PortfolioPage() {
-  const snapshots = await getPortfolioSnapshots();
+  const [snapshots, activeRace] = await Promise.all([
+    getPortfolioSnapshots(),
+    getActiveRace(),
+  ]);
 
   const latest = snapshots[snapshots.length - 1];
   const portfolioValue = latest?.bankroll_after ?? STARTING;
@@ -43,20 +46,20 @@ export default async function PortfolioPage() {
       <div style={{ display: "flex", gap: 14, marginBottom: 22 }}>
         <StatCard
           label="Portfolio Value"
-          value={`$${portfolioValue.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+          value={snapshots.length > 0 ? `$${portfolioValue.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "$1,000.00"}
           sub="Started at $1,000.00"
           style={{ flex: "0 0 32%" }}
         />
         <StatCard
           label="Oracle Return"
-          value={`${returnPct >= 0 ? "+" : ""}${returnPct.toFixed(2)}%`}
-          valueColor={returnPct >= 0 ? "#34D399" : "#F87171"}
-          sub={`vs Kalshi avg ${baselineReturn >= 0 ? "+" : ""}${baselineReturn.toFixed(2)}%`}
+          value={snapshots.length > 0 ? `${returnPct >= 0 ? "+" : ""}${returnPct.toFixed(2)}%` : "—"}
+          valueColor={snapshots.length > 0 ? (returnPct >= 0 ? "#34D399" : "#F87171") : "#52525B"}
+          sub={snapshots.length > 0 ? `vs Kalshi avg ${baselineReturn >= 0 ? "+" : ""}${baselineReturn.toFixed(2)}%` : "No settled races yet"}
         />
         <StatCard
           label="Kalshi Avg Return"
-          value={`${baselineReturn >= 0 ? "+" : ""}${baselineReturn.toFixed(2)}%`}
-          valueColor={baselineReturn >= 0 ? "#34D399" : "#F87171"}
+          value={snapshots.length > 0 ? `${baselineReturn >= 0 ? "+" : ""}${baselineReturn.toFixed(2)}%` : "—"}
+          valueColor={snapshots.length > 0 ? (baselineReturn >= 0 ? "#34D399" : "#F87171") : "#52525B"}
           sub="Crowd-weighted baseline"
         />
         <StatCard
@@ -67,8 +70,16 @@ export default async function PortfolioPage() {
       </div>
 
       {snapshots.length === 0 ? (
-        <div style={{ background: "#0E0E10", border: "1px solid #1F1F23", borderRadius: 8, padding: "32px 20px", textAlign: "center", color: "#71717A", fontSize: 14 }}>
-          Portfolio history will appear here after the first settled race.
+        <div style={{ background: "#0E0E10", border: "1px solid #1F1F23", borderRadius: 8, padding: "40px 20px", textAlign: "center" }}>
+          <div style={{ fontSize: 28, marginBottom: 10 }}>📈</div>
+          <div style={{ fontSize: 15, fontWeight: 500, color: "#FAFAFA", marginBottom: 8 }}>
+            No settled races yet
+          </div>
+          <div style={{ fontSize: 13, color: "#71717A", maxWidth: 360, margin: "0 auto", lineHeight: 1.6 }}>
+            {activeRace
+              ? <>Portfolio performance will appear here after <span style={{ color: "#D4D4D8" }}>{activeRace.name}</span> settles. Check back after the race.</>
+              : "Portfolio performance will appear here after the first race of the season settles."}
+          </div>
         </div>
       ) : (
         <>

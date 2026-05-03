@@ -1,6 +1,6 @@
 "use client";
 import { useState } from "react";
-import type { RaceRecord, MarketType } from "@/lib/types";
+import type { RaceRecord, MarketType, Race } from "@/lib/types";
 import { StatCard, BetBadge, MarketBadge, SectionCard, Edge } from "@/app/components/ui";
 
 const MONO = "var(--font-geist-mono), ui-monospace, monospace";
@@ -17,7 +17,7 @@ function formatDate(iso: string | null | undefined): string {
   return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
 
-export default function RecordView({ records, season }: { records: RaceRecord[]; season?: number }) {
+export default function RecordView({ records, season, activeRace }: { records: RaceRecord[]; season?: number; activeRace?: Race | null }) {
   const firstId = records[0]?.race.id;
   const [open, setOpen] = useState<Set<number>>(
     firstId !== undefined ? new Set([firstId]) : new Set()
@@ -57,8 +57,16 @@ export default function RecordView({ records, season }: { records: RaceRecord[];
           Season Record
         </h1>
         <div style={{ fontSize: 13, color: "#71717A", marginBottom: 22 }}>{seasonYear} season · 0 races settled</div>
-        <div style={{ background: "#0E0E10", border: "1px solid #1F1F23", borderRadius: 8, padding: "32px 20px", textAlign: "center", color: "#71717A", fontSize: 14 }}>
-          No settled bets yet. Season record will appear here after the first race.
+        <div style={{ background: "#0E0E10", border: "1px solid #1F1F23", borderRadius: 8, padding: "40px 20px", textAlign: "center" }}>
+          <div style={{ fontSize: 28, marginBottom: 10 }}>🏁</div>
+          <div style={{ fontSize: 15, fontWeight: 500, color: "#FAFAFA", marginBottom: 8 }}>
+            No settled races yet
+          </div>
+          <div style={{ fontSize: 13, color: "#71717A", maxWidth: 360, margin: "0 auto", lineHeight: 1.6 }}>
+            {activeRace
+              ? <>Bet results will appear here after <span style={{ color: "#D4D4D8" }}>{activeRace.name}</span> settles. Check back after the race.</>
+              : "Bet results will appear here after the first race of the season settles."}
+          </div>
         </div>
       </div>
     );

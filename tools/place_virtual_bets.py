@@ -52,7 +52,10 @@ def save_bets(bets: list[dict], prediction_id_map: dict):
                 INSERT INTO virtual_bets
                     (prediction_id, bet_size_dollars, kelly_fraction, bankroll_at_time)
                 VALUES (%s, %s, %s, %s)
-                ON CONFLICT DO NOTHING
+                ON CONFLICT (prediction_id) DO UPDATE
+                    SET bet_size_dollars  = EXCLUDED.bet_size_dollars,
+                        kelly_fraction    = EXCLUDED.kelly_fraction,
+                        bankroll_at_time  = EXCLUDED.bankroll_at_time
             """, (pred_id, bet["bet_size"], bet["kelly_fraction"], bet["bankroll_at_time"]))
 
 

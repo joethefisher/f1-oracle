@@ -41,6 +41,7 @@ export async function getRacePredictions(
       )
     `)
     .eq("markets.race_id", raceId)
+    .eq("model_version", "v2")
     .order("oracle_probability", { ascending: false });
 
   if (!data) return [];
@@ -70,6 +71,15 @@ export async function getRacePredictions(
       };
     })
     .filter((r): r is RacePredictionRow => r !== null);
+}
+
+export async function getSeasonTotalRaces(season: number): Promise<number> {
+  const supabase = await createServerClient();
+  const { count } = await supabase
+    .from("races")
+    .select("*", { count: "exact", head: true })
+    .eq("season", season);
+  return count ?? 0;
 }
 
 export async function getSeasonRecords(season?: number): Promise<RaceRecord[]> {

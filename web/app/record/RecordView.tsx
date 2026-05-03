@@ -17,7 +17,7 @@ function formatDate(iso: string | null | undefined): string {
   return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
 
-export default function RecordView({ records, season, activeRace }: { records: RaceRecord[]; season?: number; activeRace?: Race | null }) {
+export default function RecordView({ records, season, activeRace, totalRaces }: { records: RaceRecord[]; season?: number; activeRace?: Race | null; totalRaces?: number }) {
   const firstId = records[0]?.race.id;
   const [open, setOpen] = useState<Set<number>>(
     firstId !== undefined ? new Set([firstId]) : new Set()
@@ -56,7 +56,7 @@ export default function RecordView({ records, season, activeRace }: { records: R
         <h1 style={{ fontSize: 32, fontWeight: 600, letterSpacing: "-0.025em", margin: 0, color: "#FAFAFA", marginBottom: 6 }}>
           Season Record
         </h1>
-        <div style={{ fontSize: 13, color: "#71717A", marginBottom: 22 }}>{seasonYear} season · 0 races settled</div>
+        <div style={{ fontSize: 13, color: "#71717A", marginBottom: 22 }}>{seasonYear} season · 0 of {totalRaces || "?"} races settled</div>
         <div style={{ background: "#0E0E10", border: "1px solid #1F1F23", borderRadius: 8, padding: "40px 20px", textAlign: "center" }}>
           <div style={{ fontSize: 28, marginBottom: 10 }}>🏁</div>
           <div style={{ fontSize: 15, fontWeight: 500, color: "#FAFAFA", marginBottom: 8 }}>
@@ -79,7 +79,7 @@ export default function RecordView({ records, season, activeRace }: { records: R
         Season Record
       </h1>
       <div style={{ fontSize: 13, color: "#71717A", marginBottom: 22 }}>
-        {seasonYear} season · {records.length} race{records.length !== 1 ? "s" : ""} settled
+        {seasonYear} season · {records.length} of {totalRaces || "?"} races settled
       </div>
 
       {/* Stat cards */}

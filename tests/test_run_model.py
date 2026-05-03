@@ -16,9 +16,11 @@ def make_features_df(abbreviations):
     return pd.DataFrame({
         "abbreviation": abbreviations,
         "grid_position": list(range(1, n + 1)),
-        "recent_form": [3.0] * n,
+        "grid_pos_norm": [(i) / (n - 1) for i in range(n)],
+        "driver_elo": [1500.0] * n,
+        "constructor_elo": [1500.0] * n,
         "circuit_history": [5.0] * n,
-        "quali_to_finish_delta": [0.5] * n,
+        "is_street_circuit": [0] * n,
         "is_wet": [0] * n,
     })
 

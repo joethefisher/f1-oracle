@@ -1,23 +1,18 @@
 import pandas as pd
 
+from tools.elo import STARTING_ELO
 
-def compute_recent_form(
-    results: pd.DataFrame,
-    current_round: int,
-    current_season: int,
-    n: int = 3,
-) -> pd.DataFrame:
-    prior = results[
-        (results["season"] == current_season) & (results["round"] < current_round)
-    ].copy()
-    prior = prior.sort_values("round", ascending=False)
-    recent = prior.groupby("abbreviation").head(n)
-    return (
-        recent.groupby("abbreviation")["position"]
-        .mean()
-        .rename("recent_form")
-        .to_frame()
-    )
+# Circuits where overtaking is severely limited and grid position is stickier.
+# Street circuits have different grid→finish dynamics vs. permanent tracks.
+STREET_CIRCUITS = {
+    "Melbourne",   # Albert Park — tight, semi-street
+    "Jeddah",
+    "Baku",
+    "Miami",
+    "Monaco",
+    "Singapore",
+    "Las Vegas",
+}
 
 
 def compute_circuit_history(
@@ -41,26 +36,6 @@ def compute_circuit_history(
     )
 
 
-def compute_quali_to_finish_delta(
-    results: pd.DataFrame,
-    current_round: int,
-    current_season: int,
-    n: int = 3,
-) -> pd.DataFrame:
-    prior = results[
-        (results["season"] == current_season) & (results["round"] < current_round)
-    ].copy()
-    prior = prior.sort_values("round", ascending=False)
-    prior = prior.assign(delta=prior["grid_position"] - prior["position"])
-    recent = prior.groupby("abbreviation").head(n)
-    return (
-        recent.groupby("abbreviation")["delta"]
-        .mean()
-        .rename("quali_to_finish_delta")
-        .to_frame()
-    )
-
-
 def build_race_features(
     results_history: pd.DataFrame,
     qualifying_df: pd.DataFrame,
@@ -68,26 +43,61 @@ def build_race_features(
     current_round: int,
     current_season: int,
     is_wet: bool = False,
+    driver_elo_snapshot: dict[str, float] | None = None,
+    constructor_elo_snapshot: dict[str, float] | None = None,
+    team_rosters: dict[tuple[int, str], str] | None = None,
 ) -> pd.DataFrame:
-    drivers = (
-        qualifying_df[["abbreviation", "position"]]
-        .rename(columns={"position": "grid_position"})
-        .copy()
-    )
-    recent_form = compute_recent_form(results_history, current_round, current_season)
-    circuit_hist = compute_circuit_history(results_history, circuit, current_season)
-    delta = compute_quali_to_finish_delta(results_history, current_round, current_season)
+    """
+    Build the v2 feature matrix for a single race.
 
-    df = drivers.set_index("abbreviation")
-    df = df.join(recent_form, how="left")
-    df = df.join(circuit_hist, how="left")
-    df = df.join(delta, how="left")
+    Features (v2):
+      grid_pos_norm      - normalized qualifying position (0=pole, 1=last)
+      driver_elo         - pairwise race Elo (driver skill + recent form)
+      constructor_elo    - pairwise qualifying Elo (car pace)
+      circuit_history    - avg finish position at this circuit, last 3 seasons
+      is_street_circuit  - binary: circuit in STREET_CIRCUITS set
+      is_wet             - binary: wet conditions flag
+    """
+    base = (
+        qualifying_df[["abbreviation", "position"]]
+        .copy()
+        .rename(columns={"position": "grid_position"})
+    )
+
+    n_drivers = max(len(base), 1)
+
+    # Driver Elo: skill going into this race
+    if driver_elo_snapshot:
+        d_elo = base["abbreviation"].map(lambda a: driver_elo_snapshot.get(a, STARTING_ELO))
+    else:
+        d_elo = STARTING_ELO
+
+    # Constructor Elo: car pace going into this race
+    if constructor_elo_snapshot and team_rosters:
+        def _cons_elo(abbrev: str) -> float:
+            constructor = team_rosters.get((current_season, abbrev))
+            if constructor:
+                return constructor_elo_snapshot.get(constructor, STARTING_ELO)
+            return STARTING_ELO
+        c_elo = base["abbreviation"].map(_cons_elo)
+    else:
+        c_elo = STARTING_ELO
+
+    drivers = base.assign(
+        grid_pos_norm=(base["grid_position"] - 1) / (n_drivers - 1),
+        driver_elo=d_elo,
+        constructor_elo=c_elo,
+    )
+
+    # Circuit history (prior-season avg finish at this circuit)
+    circuit_hist = compute_circuit_history(results_history, circuit, current_season)
+    df = drivers.set_index("abbreviation").join(circuit_hist, how="left")
 
     median_grid = df["grid_position"].median()
     df = df.assign(
         circuit_history=pd.to_numeric(df["circuit_history"], errors="coerce").fillna(median_grid),
-        recent_form=pd.to_numeric(df["recent_form"], errors="coerce").fillna(median_grid),
-        quali_to_finish_delta=pd.to_numeric(df["quali_to_finish_delta"], errors="coerce").fillna(0.0),
+        is_street_circuit=int(circuit in STREET_CIRCUITS),
         is_wet=int(is_wet),
     )
+
     return df.reset_index()

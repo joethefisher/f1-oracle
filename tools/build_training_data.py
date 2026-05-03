@@ -13,6 +13,8 @@ from rich.console import Console
 
 from tools.db import cursor
 from tools.build_features import build_race_features
+from tools.elo import get_driver_elo_snapshot, get_constructor_elo_snapshot
+from tools.team_rosters import TEAM_ROSTERS
 from tools.train_model import train_market_model, save_model, MODEL_DIR
 
 console = Console()
@@ -61,10 +63,13 @@ def build_training_df(
     quali_results: pd.DataFrame,
 ) -> pd.DataFrame:
     """
-    For each race in the DB, build features using only prior races as history.
+    For each race in the DB, build v2 features using only prior races as history.
     Attaches targets: won, podium, pole.
     Skips a race if there is insufficient prior history.
     """
+    # Rename quali position column to match elo function expectations
+    quali_for_elo = quali_results.rename(columns={"quali_position": "position"}) if not quali_results.empty else quali_results
+
     all_rows: list[pd.DataFrame] = []
 
     race_keys = (
@@ -106,6 +111,12 @@ def build_training_df(
         if grid_df.empty or grid_df["position"].isna().all():
             continue
 
+        # Elo snapshots: ratings going INTO this race
+        driver_elo = get_driver_elo_snapshot(race_results, season, round_num)
+        constructor_elo = get_constructor_elo_snapshot(
+            quali_for_elo, season, round_num, TEAM_ROSTERS
+        ) if not quali_results.empty else {}
+
         try:
             features = build_race_features(
                 results_history=prior,
@@ -114,6 +125,9 @@ def build_training_df(
                 current_round=round_num,
                 current_season=season,
                 is_wet=False,
+                driver_elo_snapshot=driver_elo,
+                constructor_elo_snapshot=constructor_elo,
+                team_rosters=TEAM_ROSTERS,
             )
         except Exception:
             continue
@@ -171,7 +185,7 @@ def main():
     else:
         console.print("[yellow]No qualifying results in DB — using race grid positions as fallback[/]")
 
-    console.print("Building feature matrix...")
+    console.print("Building feature matrix (with Elo snapshots per race)...")
     df = build_training_df(race_results, quali_results)
 
     if df.empty:
@@ -184,7 +198,7 @@ def main():
     targets = [args.market_type] if args.market_type else MARKET_TYPES
     trained = []
     for market_type in targets:
-        console.print(f"Training {market_type}...")
+        console.print(f"Training {market_type} (calibrated logistic regression)...")
         try:
             model = train_market_model(df, market_type)
         except ValueError as e:

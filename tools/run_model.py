@@ -12,7 +12,9 @@ from rich.console import Console
 
 from tools.db import cursor
 from tools.build_features import build_race_features
-from tools.train_model import FEATURE_COLS, load_model
+from tools.train_model import FEATURE_COLS, MODEL_VERSION, load_model
+from tools.elo import get_driver_elo_snapshot, get_constructor_elo_snapshot
+from tools.team_rosters import TEAM_ROSTERS
 from tools.place_virtual_bets import compute_bets, save_bets
 from tools.portfolio import MIN_EDGE
 
@@ -20,7 +22,6 @@ console = Console()
 
 STARTING_BANKROLL = 1000.0
 MARKET_TYPES = ["race_winner", "podium", "pole"]
-MODEL_VERSION = "v1"
 
 
 def normalize_probabilities(raw_probs: np.ndarray) -> np.ndarray:
@@ -75,6 +76,19 @@ def load_race_history() -> pd.DataFrame:
     )
 
 
+def load_qualifying_history() -> pd.DataFrame:
+    """Load all qualifying results for Elo computation."""
+    with cursor() as cur:
+        cur.execute("""
+            SELECT r.season, r.round, qr.abbreviation, qr.position
+            FROM qualifying_results qr
+            JOIN races r ON qr.race_id = r.id
+            WHERE qr.position IS NOT NULL
+        """)
+        rows = cur.fetchall()
+    return pd.DataFrame(rows, columns=["season", "round", "abbreviation", "position"])
+
+
 def load_qualifying_for_race(race_id: int) -> pd.DataFrame:
     with cursor() as cur:
         cur.execute(
@@ -95,7 +109,7 @@ def get_markets_for_race(race_id: int, market_type: str) -> dict:
               AND driver_abbreviation IS NOT NULL
         """, (race_id, market_type))
         rows = cur.fetchall()
-    return {row[1]: row[0] for row in rows}  # abbreviation → market_id
+    return {row[1]: row[0] for row in rows}
 
 
 def get_current_bankroll() -> float:
@@ -165,7 +179,6 @@ def get_kalshi_mids(race_id: int, market_type: str) -> dict:
     return mids
 
 
-
 def run_race(season: int, round_num: int, market_types: list[str], is_wet: bool = False):
     race_id = get_race_id(season, round_num)
     circuit = get_race_circuit(race_id)
@@ -175,11 +188,18 @@ def run_race(season: int, round_num: int, market_types: list[str], is_wet: bool 
     if history.empty:
         raise RuntimeError("No historical race data in DB. Run ingest_historical.py first.")
 
+    quali_history = load_qualifying_history()
+
     prior = history[
         (history["season"] < season)
         | ((history["season"] == season) & (history["round"] < round_num))
     ]
     console.print(f"Prior history: {len(prior)} driver-race rows")
+
+    # Elo ratings going into this race
+    driver_elo = get_driver_elo_snapshot(history, season, round_num)
+    constructor_elo = get_constructor_elo_snapshot(quali_history, season, round_num, TEAM_ROSTERS)
+    console.print(f"Elo computed: {len(driver_elo)} drivers, {len(constructor_elo)} constructors")
 
     quali = load_qualifying_for_race(race_id)
     if quali.empty:
@@ -202,6 +222,9 @@ def run_race(season: int, round_num: int, market_types: list[str], is_wet: bool 
         current_round=round_num,
         current_season=season,
         is_wet=is_wet,
+        driver_elo_snapshot=driver_elo,
+        constructor_elo_snapshot=constructor_elo,
+        team_rosters=TEAM_ROSTERS,
     )
     console.print(f"Built features for {len(features)} drivers")
 
@@ -213,7 +236,7 @@ def run_race(season: int, round_num: int, market_types: list[str], is_wet: bool 
         try:
             model = load_model(market_type)
         except FileNotFoundError:
-            console.print(f"[red]Model not found for {market_type}. Run build_training_data.py first.[/]")
+            console.print(f"[red]Model not found for {market_type}. Run build_training_data first.[/]")
             continue
 
         preds = predict_race(features, model)
@@ -228,7 +251,7 @@ def run_race(season: int, round_num: int, market_types: list[str], is_wet: bool 
         pred_id_map = save_predictions_and_get_ids(
             market_abbrev_map, preds, kalshi_mid_map
         )
-        console.print(f"Saved {len(pred_id_map)} predictions")
+        console.print(f"Saved {len(pred_id_map)} predictions (model_version={MODEL_VERSION})")
 
         bet_inputs = [
             {

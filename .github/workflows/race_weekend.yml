@@ -2,8 +2,10 @@ name: F1 Oracle — Race Weekend Automation
 
 on:
   schedule:
-    # Every 30 minutes, year-round (UTC)
-    - cron: "*/30 * * * *"
+    # Race weekend window: every 30 min Thu–Sun (UTC)
+    - cron: "*/30 * * * 4-7"
+    # Early-week: once daily Mon–Wed to catch markets opening ~7 days pre-race
+    - cron: "0 9 * * 1,2,3"
   workflow_dispatch:
     inputs:
       dry_run:
@@ -16,8 +18,35 @@ on:
         default: ""
 
 jobs:
+  gate:
+    name: Race Week Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      active: ${{ steps.chk.outputs.active }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install psycopg
+        run: pip install "psycopg[binary]"
+
+      - name: Check for active race week
+        id: chk
+        run: python tools/race_gate.py >> $GITHUB_OUTPUT
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+
   orchestrate:
     name: Run Orchestrator
+    needs: gate
+    if: needs.gate.outputs.active == 'true' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 20
 

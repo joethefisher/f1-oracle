@@ -1,11 +1,24 @@
 """
-Static driver-to-constructor mapping for 2022–2026.
+Static driver-to-constructor mapping for 2021–2026.
 Used by the Elo engine to compute constructor pace ratings from qualifying sessions.
 
 Missing entries default to STARTING_ELO (1500) in elo.py — no crash, just a neutral rating.
 """
 
 TEAM_ROSTERS: dict[tuple[int, str], str] = {
+    # ── 2021 ──────────────────────────────────────────────────────────────────
+    (2021, "VER"): "Red Bull",    (2021, "PER"): "Red Bull",
+    (2021, "HAM"): "Mercedes",    (2021, "BOT"): "Mercedes",
+    (2021, "LEC"): "Ferrari",     (2021, "SAI"): "Ferrari",
+    (2021, "NOR"): "McLaren",     (2021, "RIC"): "McLaren",
+    (2021, "ALO"): "Alpine",      (2021, "OCO"): "Alpine",
+    (2021, "GAS"): "AlphaTauri",  (2021, "TSU"): "AlphaTauri",
+    (2021, "STR"): "Aston Martin",(2021, "VET"): "Aston Martin",
+    (2021, "RAI"): "Alfa Romeo",  (2021, "GIO"): "Alfa Romeo",
+    (2021, "LAT"): "Williams",    (2021, "RUS"): "Williams",
+    (2021, "MAZ"): "Haas",        (2021, "MSC"): "Haas",
+    # Kubica subbed in for Giovinazzi at Alfa Romeo (one race)
+    (2021, "KUB"): "Alfa Romeo",
     # ── 2022 ──────────────────────────────────────────────────────────────────
     (2022, "VER"): "Red Bull",    (2022, "PER"): "Red Bull",
     (2022, "LEC"): "Ferrari",     (2022, "SAI"): "Ferrari",

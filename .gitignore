@@ -17,3 +17,7 @@ build/
 credentials.json
 token.json
 *.pem
+
+# Internal design/planning files (not for public)
+design_handoff_f1_oracle/
+docs/design-brief-f1-oracle.md

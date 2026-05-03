@@ -7,7 +7,7 @@ Deploy the Next.js frontend to Vercel and keep it live.
 
 ### 1. Import project to Vercel
 1. Go to vercel.com → New Project
-2. Import from GitHub: `joethefisher/f1-oracle`
+2. Import from GitHub: `<your-username>/f1-oracle`
 3. Set **Root Directory** to `web`
 4. Framework: Next.js (auto-detected)
 5. Build command: `npm run build` (default)
@@ -15,7 +15,7 @@ Deploy the Next.js frontend to Vercel and keep it live.
 ### 2. Set environment variables in Vercel dashboard
 Under Project Settings → Environment Variables, add:
 ```
-NEXT_PUBLIC_SUPABASE_URL=https://goexgkwgaahdnolskmok.supabase.co
+NEXT_PUBLIC_SUPABASE_URL=https://<your-project>.supabase.co
 NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=<your publishable key from Supabase>
 ```
 

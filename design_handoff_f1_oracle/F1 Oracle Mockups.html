@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>F1 Oracle — Mockups</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700;800&family=Geist+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  html, body { margin: 0; padding: 0; background: #0A0A0A; color: #FAFAFA; font-family: 'Geist', system-ui, sans-serif; }
+  * { box-sizing: border-box; }
+</style>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel" src="design-canvas.jsx"></script>
+<script type="text/babel" src="tweaks-panel.jsx"></script>
+<script type="text/babel" src="pages/shell.jsx"></script>
+<script type="text/babel" src="pages/race-weekend.jsx"></script>
+<script type="text/babel" src="pages/season-record.jsx"></script>
+<script type="text/babel" src="pages/portfolio.jsx"></script>
+
+<script type="text/babel">
+  const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
+    "view": "all",
+    "accent": "#E8002D",
+    "bg": "#100D0B",
+    "density": "regular",
+    "mono": true,
+    "cardStyle": "bordered",
+    "showBet": true
+  }/*EDITMODE-END*/;
+
+  const ACCENT_PRESETS = {
+    "F1 Red":    "#E8002D",
+    "Amber":     "#F59E0B",
+    "Indigo":    "#6366F1",
+    "Cyan":      "#22D3EE",
+    "Magenta":   "#EC4899",
+  };
+
+  const BG_PRESETS = {
+    "True Black": "#0A0A0A",
+    "Charcoal":   "#0F1012",
+    "Warm Black": "#100D0B",
+  };
+
+  function App() {
+    const [t, setTweak] = useTweaks(TWEAK_DEFAULTS);
+
+    const ctxValue = {
+      accent: t.accent,
+      bg: t.bg,
+      density: t.density,
+      mono: t.mono,
+      cardStyle: t.cardStyle,
+      showBet: t.showBet,
+    };
+
+    // The board: either show all 3 in a canvas, or focus on one as a full prototype
+    const single = t.view !== "all";
+    const PageMap = { rw: RaceWeekend, sr: SeasonRecord, pf: Portfolio };
+    const SinglePage = PageMap[t.view];
+
+    return (
+      <TweakContext.Provider value={ctxValue}>
+        {single ? (
+          <div style={{ width: "100%", minHeight: "100vh", background: t.bg }}>
+            <SinglePage />
+          </div>
+        ) : (
+          <DesignCanvas title="F1 Oracle — page mockups" subtitle="Dark analytics SaaS · Geist + Geist Mono">
+            <DCSection id="pages" title="Pages" subtitle="Three full-page mockups per the design brief">
+              <DCArtboard id="race-weekend"  label="01 · Race Weekend"  width={1100} height={1180}>
+                <RaceWeekend />
+              </DCArtboard>
+              <DCArtboard id="season-record" label="02 · Season Record" width={1100} height={1180}>
+                <SeasonRecord />
+              </DCArtboard>
+              <DCArtboard id="portfolio"     label="03 · Portfolio"     width={1100} height={1180}>
+                <Portfolio />
+              </DCArtboard>
+            </DCSection>
+          </DesignCanvas>
+        )}
+
+        <TweaksPanel title="Tweaks">
+          <TweakSection label="View" />
+          <TweakSelect label="Page" value={t.view}
+            options={[
+              { value: "all", label: "All 3 (canvas)" },
+              { value: "rw",  label: "Race Weekend" },
+              { value: "sr",  label: "Season Record" },
+              { value: "pf",  label: "Portfolio" },
+            ]}
+            onChange={(v) => setTweak("view", v)} />
+
+          <TweakSection label="Brand" />
+          <TweakSelect label="Accent"
+            value={Object.entries(ACCENT_PRESETS).find(([k,v]) => v === t.accent)?.[0] || "Custom"}
+            options={Object.keys(ACCENT_PRESETS).map(k => ({ value: k, label: k }))}
+            onChange={(v) => setTweak("accent", ACCENT_PRESETS[v])} />
+          <TweakColor label="Custom accent" value={t.accent}
+            onChange={(v) => setTweak("accent", v)} />
+          <TweakSelect label="Background"
+            value={Object.entries(BG_PRESETS).find(([k,v]) => v === t.bg)?.[0] || "True Black"}
+            options={Object.keys(BG_PRESETS).map(k => ({ value: k, label: k }))}
+            onChange={(v) => setTweak("bg", BG_PRESETS[v])} />
+
+          <TweakSection label="Layout" />
+          <TweakRadio label="Density" value={t.density}
+            options={["compact", "regular", "comfy"]}
+            onChange={(v) => setTweak("density", v)} />
+          <TweakRadio label="Card style" value={t.cardStyle}
+            options={["bordered", "elevated", "flat"]}
+            onChange={(v) => setTweak("cardStyle", v)} />
+
+          <TweakSection label="Data" />
+          <TweakToggle label="Mono numerals in stats" value={t.mono}
+            onChange={(v) => setTweak("mono", v)} />
+          <TweakToggle label="Highlight BET rows" value={t.showBet}
+            onChange={(v) => setTweak("showBet", v)} />
+        </TweaksPanel>
+      </TweakContext.Provider>
+    );
+  }
+
+  ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>

@@ -130,6 +130,11 @@ def save_predictions_and_get_ids(
                 INSERT INTO predictions
                     (market_id, oracle_probability, kalshi_mid_price, edge, model_version)
                 VALUES (%s, %s, %s, %s, %s)
+                ON CONFLICT (market_id, model_version) DO UPDATE
+                    SET oracle_probability = EXCLUDED.oracle_probability,
+                        kalshi_mid_price   = EXCLUDED.kalshi_mid_price,
+                        edge               = EXCLUDED.edge,
+                        predicted_at       = NOW()
                 RETURNING id
             """, (market_id, pred["probability"], kalshi_mid, edge, MODEL_VERSION))
             pred_id = cur.fetchone()[0]
@@ -161,7 +166,7 @@ def get_kalshi_mids(race_id: int, market_type: str) -> dict:
 
 
 
-def run_race(season: int, round_num: int, market_types: list[str]):
+def run_race(season: int, round_num: int, market_types: list[str], is_wet: bool = False):
     race_id = get_race_id(season, round_num)
     circuit = get_race_circuit(race_id)
     console.print(f"Race: {season} R{round_num} — {circuit} (id={race_id})")
@@ -196,7 +201,7 @@ def run_race(season: int, round_num: int, market_types: list[str]):
         circuit=circuit,
         current_round=round_num,
         current_season=season,
-        is_wet=False,
+        is_wet=is_wet,
     )
     console.print(f"Built features for {len(features)} drivers")
 
@@ -261,9 +266,10 @@ def main():
         default=None,
         help="Run only this market type (default: all)",
     )
+    parser.add_argument("--wet", action="store_true", help="Flag race conditions as wet")
     args = parser.parse_args()
     targets = [args.market_type] if args.market_type else MARKET_TYPES
-    run_race(args.season, args.round_num, targets)
+    run_race(args.season, args.round_num, targets, is_wet=args.wet)
 
 
 if __name__ == "__main__":

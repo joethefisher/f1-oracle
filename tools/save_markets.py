@@ -66,6 +66,7 @@ def save_markets(race_id: int, event_ticker: str, market_type: str):
                 row["market_type"], row["driver_name"], row["driver_abbreviation"], row["status"],
             ))
     console.print(f"[green]Saved {len(rows)} {market_type} markets for {event_ticker}[/]")
+    return len(rows)
 
 
 def main():

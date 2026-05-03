@@ -1,0 +1,70 @@
+name: F1 Oracle — Race Weekend Automation
+
+on:
+  schedule:
+    # Every 30 minutes, year-round (UTC)
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Dry run (log only, no DB writes)"
+        required: false
+        default: "false"
+      race_id:
+        description: "Force a specific race ID (optional)"
+        required: false
+        default: ""
+
+jobs:
+  orchestrate:
+    name: Run Orchestrator
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Get cache key month
+        id: month
+        run: echo "val=$(date +'%Y-%m')" >> $GITHUB_OUTPUT
+
+      - name: Restore FastF1 cache
+        uses: actions/cache@v4
+        with:
+          path: .tmp/fastf1_cache
+          # Rotate monthly to avoid stale data across seasons
+          key: fastf1-${{ runner.os }}-${{ hashFiles('requirements.txt') }}-${{ steps.month.outputs.val }}
+          restore-keys: |
+            fastf1-${{ runner.os }}-${{ hashFiles('requirements.txt') }}-
+
+      - name: Create cache directory
+        run: mkdir -p .tmp/fastf1_cache
+
+      - name: Run orchestrator
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
+        run: |
+          RACE_ID_ARG=""
+          if [ -n "${{ github.event.inputs.race_id }}" ]; then
+            RACE_ID_ARG="--race-id ${{ github.event.inputs.race_id }}"
+          fi
+          python -m tools.orchestrate $RACE_ID_ARG
+
+      # Always save cache so subsequent runs benefit even if this run had errors
+      - name: Save FastF1 cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: .tmp/fastf1_cache
+          key: fastf1-${{ runner.os }}-${{ hashFiles('requirements.txt') }}-${{ steps.month.outputs.val }}

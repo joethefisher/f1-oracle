@@ -131,22 +131,27 @@ def load_session(season: int, round_num: int, session_type: str):
     return session
 
 
-def upsert_race(season: int, round_num: int, session) -> int:
+def upsert_race(season: int, round_num: int, session, session_type: str = "R") -> int:
     name = get_race_name(session)
     circuit = get_circuit(session)
     race_date = session.date.isoformat() if hasattr(session.date, "isoformat") else str(session.date)
+    # Only mark completed when ingesting the race session itself, not qualifying
+    new_status = "completed" if session_type == "R" else "active"
 
     with cursor() as cur:
         cur.execute("""
             INSERT INTO races (season, round, name, circuit, race_date_utc, status)
-            VALUES (%s, %s, %s, %s, %s, 'completed')
+            VALUES (%s, %s, %s, %s, %s, %s)
             ON CONFLICT (season, round) DO UPDATE
                 SET name = EXCLUDED.name,
                     circuit = EXCLUDED.circuit,
                     race_date_utc = EXCLUDED.race_date_utc,
-                    status = 'completed'
+                    status = CASE
+                        WHEN races.status = 'completed' THEN 'completed'
+                        ELSE EXCLUDED.status
+                    END
             RETURNING id
-        """, (season, round_num, name, circuit, race_date))
+        """, (season, round_num, name, circuit, race_date, new_status))
         race_id = cur.fetchone()[0]
     return race_id
 
@@ -209,7 +214,7 @@ def ingest(season: int, round_num: int, session_type: str = "R"):
     else:
         rows = parse_results_race(session, season, round_num)
 
-    race_id = upsert_race(season, round_num, session)
+    race_id = upsert_race(season, round_num, session, session_type)
     upsert_results(rows, race_id, session_type)
     n_with_pos = sum(1 for r in rows if r["position"] is not None)
     console.print(f"[green]Ingested {season} R{round_num} ({session_type}) — {len(rows)} drivers, {n_with_pos} with position[/]")

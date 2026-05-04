@@ -218,7 +218,8 @@ export default function RaceView({ race, predictions }: Props) {
                   <th style={{ ...headerCell, width: 48, textAlign: "center" }}>#</th>
                   <th style={headerCell}>Driver</th>
                   <th style={{ ...headerCell, width: 220 }}>Oracle vs Kalshi</th>
-                  <th style={{ ...headerCell, width: 110, textAlign: "right" }}>Edge</th>
+                  <th style={{ ...headerCell, width: 90, textAlign: "right" }}>Edge</th>
+                  <th style={{ ...headerCell, width: 90, textAlign: "right" }}>Payout</th>
                 </tr>
               </thead>
               <tbody>
@@ -227,6 +228,7 @@ export default function RaceView({ race, predictions }: Props) {
                   const rowBg = hasBet ? "rgba(16,185,129,0.06)" : (i % 2 === 0 ? "#0A0A0A" : "#0C0C0E");
                   const abbrev = abbrevFromTicker(row.kalshi_ticker);
                   const showKalshi = row.kalshi_mid_price > 0 && row.kalshi_mid_price < 0.94;
+                  const multiplier = hasBet && row.kalshi_mid_price > 0 ? (1 / row.kalshi_mid_price).toFixed(1) + "×" : null;
                   return (
                     <tr key={row.kalshi_ticker} style={{ background: rowBg, borderBottom: "1px solid #15151A" }}>
                       <td style={{ padding: "16px 20px", color: "#52525B", fontSize: 12, fontFamily: MONO, textAlign: "center", borderLeft: hasBet ? "2px solid #10B981" : "2px solid transparent" }}>
@@ -249,6 +251,15 @@ export default function RaceView({ race, predictions }: Props) {
                       </td>
                       <td style={{ padding: "16px 20px", textAlign: "right" }}>
                         <Edge valuePct={row.edge * 100} />
+                      </td>
+                      <td style={{ padding: "16px 20px", textAlign: "right" }}>
+                        {multiplier ? (
+                          <span style={{ display: "inline-flex", alignItems: "center", padding: "3px 8px", borderRadius: 4, fontFamily: MONO, fontSize: 11, fontWeight: 600, background: "rgba(16,185,129,0.1)", color: "#34D399", border: "1px solid rgba(16,185,129,0.2)" }}>
+                            {multiplier}
+                          </span>
+                        ) : (
+                          <span style={{ fontFamily: MONO, fontSize: 13, color: "#27272A" }}>—</span>
+                        )}
                       </td>
                     </tr>
                   );

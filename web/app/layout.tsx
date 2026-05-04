@@ -22,7 +22,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 <span style={{ fontWeight: 800, fontSize: 26, color: "#E8002D", letterSpacing: "-0.02em", lineHeight: 1 }}>F1</span>
                 <span style={{ fontWeight: 600, fontSize: 26, color: "#FAFAFA", letterSpacing: "-0.02em", lineHeight: 1 }}>Oracle</span>
               </div>
-              <span style={{ color: "#52525B", fontSize: 13 }}>ML model vs the crowd</span>
+              <span style={{ color: "#52525B", fontSize: 13 }}>ML Model vs Kalshi</span>
             </div>
           </div>
         </header>

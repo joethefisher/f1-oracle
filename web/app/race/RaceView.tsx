@@ -218,8 +218,8 @@ export default function RaceView({ race, predictions }: Props) {
                   <th style={{ ...headerCell, width: 48, textAlign: "center" }}>#</th>
                   <th style={headerCell}>Driver</th>
                   <th style={{ ...headerCell, width: 220 }}>Oracle vs Kalshi</th>
-                  <th style={{ ...headerCell, width: 90, textAlign: "right" }}>Edge</th>
                   <th style={{ ...headerCell, width: 90, textAlign: "right" }}>Payout</th>
+                  <th style={{ ...headerCell, width: 90, textAlign: "right" }}>Edge</th>
                 </tr>
               </thead>
               <tbody>
@@ -250,9 +250,6 @@ export default function RaceView({ race, predictions }: Props) {
                         </div>
                       </td>
                       <td style={{ padding: "16px 20px", textAlign: "right" }}>
-                        <Edge valuePct={row.edge * 100} />
-                      </td>
-                      <td style={{ padding: "16px 20px", textAlign: "right" }}>
                         {multiplier ? (
                           <span style={{ display: "inline-flex", alignItems: "center", padding: "3px 8px", borderRadius: 4, fontFamily: MONO, fontSize: 11, fontWeight: 600, background: "rgba(16,185,129,0.1)", color: "#34D399", border: "1px solid rgba(16,185,129,0.2)" }}>
                             {multiplier}
@@ -260,6 +257,9 @@ export default function RaceView({ race, predictions }: Props) {
                         ) : (
                           <span style={{ fontFamily: MONO, fontSize: 13, color: "#27272A" }}>—</span>
                         )}
+                      </td>
+                      <td style={{ padding: "16px 20px", textAlign: "right" }}>
+                        <Edge valuePct={row.edge * 100} />
                       </td>
                     </tr>
                   );

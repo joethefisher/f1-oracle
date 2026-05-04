@@ -61,10 +61,12 @@ export default function RaceView({ race, predictions }: Props) {
   const raceDate = new Date(race.race_date_utc);
   const now = new Date();
   const daysUntilRace = Math.ceil((raceDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+  const isCompleted = race.status === "completed";
   const statusLabel =
-    daysUntilRace <= 0 ? "RACE DAY · MODEL v0.4" :
-    daysUntilRace === 1 ? "RACE TOMORROW · MODEL v0.4" :
-    `RACE IN ${daysUntilRace}D · MODEL v0.4`;
+    isCompleted            ? "COMPLETED · MODEL v0.4" :
+    daysUntilRace <= 0    ? "RACE DAY · MODEL v0.4" :
+    daysUntilRace === 1   ? "RACE TOMORROW · MODEL v0.4" :
+                            `RACE IN ${daysUntilRace}D · MODEL v0.4`;
 
   // Reset showAll when switching markets
   const handleMarketChange = (m: MarketType) => {
@@ -91,7 +93,7 @@ export default function RaceView({ race, predictions }: Props) {
         <h1 style={{ fontSize: 32, fontWeight: 600, letterSpacing: "-0.025em", margin: 0, color: "#FAFAFA" }}>
           {race.name}
         </h1>
-        <div style={{ fontSize: 12, color: daysUntilRace <= 1 ? "#E8002D" : "#52525B", fontFamily: MONO }}>
+        <div style={{ fontSize: 12, color: isCompleted ? "#52525B" : daysUntilRace <= 1 ? "#E8002D" : "#52525B", fontFamily: MONO }}>
           {statusLabel}
         </div>
       </div>

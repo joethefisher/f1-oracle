@@ -13,14 +13,33 @@ export interface RacePredictionRow {
 
 export async function getActiveRace(): Promise<Race | null> {
   const supabase = await createServerClient();
-  const { data } = await supabase
+
+  // Show an active race always, or an upcoming race once it's within 4 days.
+  // This prevents the tab from jumping to a future race with no predictions
+  // during the gap between race weekends.
+  const windowEnd = new Date(Date.now() + 4 * 24 * 60 * 60 * 1000).toISOString();
+  const { data: current } = await supabase
     .from("races")
     .select("*")
     .in("status", ["active", "upcoming"])
+    .lte("race_date_utc", windowEnd)
     .order("race_date_utc", { ascending: true })
     .limit(1)
-    .single();
-  return (data as Race) ?? null;
+    .maybeSingle();
+
+  if (current) return current as Race;
+
+  // Between race weekends: show the most recently completed race so predictions
+  // remain visible until the next weekend opens.
+  const { data: last } = await supabase
+    .from("races")
+    .select("*")
+    .eq("status", "completed")
+    .order("race_date_utc", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  return (last as Race) ?? null;
 }
 
 export async function getRacePredictions(

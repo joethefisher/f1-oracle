@@ -2,7 +2,7 @@
 
 A public ML model that predicts Formula 1 race outcomes and competes against [Kalshi](https://kalshi.com) prediction market prices. The Oracle publishes its probability estimates, places virtual bets on every race weekend, and grades itself after every race. No real money — it's a public scorecard answering one question: *does having a model beat following the crowd?*
 
-**Live site:** [f1oracle.vercel.app](https://web-silk-xi-22.vercel.app)
+**Live site:** [joeking.ai/f1-oracle](https://joeking.ai/f1-oracle)
 
 ---
 

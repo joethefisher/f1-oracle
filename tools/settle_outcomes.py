@@ -8,6 +8,8 @@ Usage:
 import argparse
 from rich.console import Console
 
+from tools.train_model import MODEL_VERSION
+
 console = Console()
 
 _PODIUM_POSITIONS = {1, 2, 3}
@@ -61,10 +63,10 @@ def settle_race(race_id: int):
                    p.id AS pred_id, p.kalshi_mid_price,
                    vb.id AS bet_id, vb.bet_size_dollars
             FROM markets m
-            JOIN predictions p ON p.market_id = m.id
+            JOIN predictions p ON p.market_id = m.id AND p.model_version = %s
             JOIN virtual_bets vb ON vb.prediction_id = p.id
             WHERE m.race_id = %s
-        """, (race_id,))
+        """, (MODEL_VERSION, race_id,))
         bets = cur.fetchall()
 
         cur.execute(

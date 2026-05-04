@@ -7,6 +7,8 @@ Usage:
 import argparse
 from rich.console import Console
 
+from tools.train_model import MODEL_VERSION
+
 console = Console()
 
 STARTING_BANKROLL = 1000.0
@@ -79,11 +81,11 @@ def compute_and_save(race_id: int):
         cur.execute("""
             SELECT vb.bet_size_dollars, p.kalshi_mid_price, o.winning_side
             FROM virtual_bets vb
-            JOIN predictions p ON vb.prediction_id = p.id
+            JOIN predictions p ON vb.prediction_id = p.id AND p.model_version = %s
             JOIN markets m ON p.market_id = m.id
             LEFT JOIN outcomes o ON o.market_id = m.id
             WHERE m.race_id = %s
-        """, (race_id,))
+        """, (MODEL_VERSION, race_id,))
         rows = cur.fetchall()
 
     if not rows:

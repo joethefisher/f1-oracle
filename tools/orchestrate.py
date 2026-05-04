@@ -101,12 +101,14 @@ def qualifying_results_exist(race_id: int) -> bool:
 
 
 def predictions_exist(race_id: int) -> bool:
-    return _count(
-        """SELECT COUNT(*) FROM predictions p
-           JOIN markets m ON p.market_id = m.id
-           WHERE m.race_id = %s""",
-        (race_id,),
-    ) > 0
+    from tools.train_model import MODEL_VERSION
+    with cursor() as cur:
+        cur.execute("""
+            SELECT COUNT(*) FROM predictions p
+            JOIN markets m ON p.market_id = m.id
+            WHERE m.race_id = %s AND p.model_version = %s
+        """, (race_id, MODEL_VERSION))
+        return cur.fetchone()[0] > 0
 
 
 def race_results_exist(race_id: int) -> bool:

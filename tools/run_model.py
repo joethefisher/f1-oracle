@@ -122,6 +122,24 @@ def get_current_bankroll() -> float:
     return float(row[0]) if row else STARTING_BANKROLL
 
 
+def purge_stale_bets(race_id: int) -> int:
+    """Delete virtual_bets for this race that belong to a different model version.
+
+    Called before placing new bets so only one model version's bets exist per race.
+    Returns the number of bets deleted.
+    """
+    with cursor() as cur:
+        cur.execute("""
+            DELETE FROM virtual_bets
+            WHERE prediction_id IN (
+                SELECT p.id FROM predictions p
+                JOIN markets m ON p.market_id = m.id
+                WHERE m.race_id = %s AND p.model_version != %s
+            )
+        """, (race_id, MODEL_VERSION))
+        return cur.rowcount
+
+
 def save_predictions_and_get_ids(
     market_abbrev_map: dict,
     predictions: list[dict],
@@ -265,6 +283,9 @@ def run_race(season: int, round_num: int, market_types: list[str], is_wet: bool 
         ]
         bets = compute_bets(bet_inputs, bankroll)
         n_bets = sum(1 for b in bets if b["bet_size"] > 0)
+        purged = purge_stale_bets(race_id)
+        if purged:
+            console.print(f"[yellow]Purged {purged} stale bets from other model versions[/]")
         save_bets(bets, pred_id_map)
         console.print(f"[green]Placed {n_bets} bets (edge ≥ {MIN_EDGE*100:.0f}%)[/]")
 

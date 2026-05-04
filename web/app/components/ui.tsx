@@ -38,10 +38,11 @@ export function StatCard({
   );
 }
 
-export function BetBadge() {
+export function BetBadge({ amount }: { amount?: number } = {}) {
+  const label = amount ? `BET · $${Math.round(amount)}` : "BET";
   return (
     <span style={{ display: "inline-flex", alignItems: "center", padding: "2px 7px", fontSize: 10, fontWeight: 600, letterSpacing: "0.08em", borderRadius: 4, background: "rgba(16,185,129,0.15)", color: "#34D399", border: "1px solid rgba(16,185,129,0.35)", fontFamily: MONO }}>
-      BET
+      {label}
     </span>
   );
 }

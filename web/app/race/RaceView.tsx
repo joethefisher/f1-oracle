@@ -238,7 +238,7 @@ export default function RaceView({ race, predictions }: Props) {
                             {abbrev}
                           </span>
                           <span style={{ color: "#A1A1AA", fontSize: 13 }}>{row.driver_name}</span>
-                          {hasBet && <BetBadge />}
+                          {hasBet && <BetBadge amount={row.bet_size_dollars} />}
                         </div>
                       </td>
                       <td style={{ padding: "12px 20px" }}>

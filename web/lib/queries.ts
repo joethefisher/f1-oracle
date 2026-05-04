@@ -10,6 +10,7 @@ export interface RacePredictionRow {
   edge: number;
   predicted_at: string;
   has_bet: boolean;
+  bet_size_dollars: number;
 }
 
 export async function getActiveRace(): Promise<Race | null> {
@@ -92,6 +93,7 @@ export async function getRacePredictions(
         edge: r.edge,
         predicted_at: r.predicted_at,
         has_bet: (r.virtual_bets?.bet_size_dollars ?? 0) > 0,
+        bet_size_dollars: r.virtual_bets?.bet_size_dollars ?? 0,
       };
     })
     .filter((r): r is RacePredictionRow => r !== null);

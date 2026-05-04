@@ -9,6 +9,7 @@ export interface RacePredictionRow {
   kalshi_mid_price: number;
   edge: number;
   predicted_at: string;
+  has_bet: boolean;
 }
 
 export async function getActiveRace(): Promise<Race | null> {
@@ -53,6 +54,7 @@ export async function getRacePredictions(
       kalshi_mid_price,
       edge,
       predicted_at,
+      virtual_bets ( bet_size_dollars ),
       markets (
         driver_name,
         market_type,
@@ -72,6 +74,8 @@ export async function getRacePredictions(
         kalshi_mid_price: number;
         edge: number;
         predicted_at: string;
+        // has-one (unique FK): Supabase returns a single object, not array
+        virtual_bets: { bet_size_dollars: number } | null;
         markets: {
           driver_name: string | null;
           market_type: string;
@@ -87,6 +91,7 @@ export async function getRacePredictions(
         kalshi_mid_price: r.kalshi_mid_price,
         edge: r.edge,
         predicted_at: r.predicted_at,
+        has_bet: (r.virtual_bets?.bet_size_dollars ?? 0) > 0,
       };
     })
     .filter((r): r is RacePredictionRow => r !== null);
@@ -162,7 +167,8 @@ export async function getSeasonRecords(season?: number): Promise<RaceRecord[]> {
           driver_name: string | null;
           market_type: string;
           race_id: number;
-          outcomes: { winning_side: string }[] | null;
+          // Supabase returns has-one as a single object (unique FK), not an array
+          outcomes: { winning_side: string } | null;
         } | null;
       } | null;
     };
@@ -172,7 +178,7 @@ export async function getSeasonRecords(season?: number): Promise<RaceRecord[]> {
       .map((b) => {
         const pred = b.predictions!;
         const market = pred.markets!;
-        const won = market.outcomes?.[0]?.winning_side === "yes";
+        const won = market.outcomes?.winning_side === "yes";
         const pnl = won
           ? b.bet_size_dollars * (1 / pred.kalshi_mid_price - 1)
           : -b.bet_size_dollars;

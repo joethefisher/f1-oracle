@@ -42,9 +42,11 @@ export default function RaceView({ race, predictions }: Props) {
       })
     : null;
 
-  // All bets across every market for the weekend summary card
+  // All bets across every market for the weekend summary card — use actual
+  // virtual_bets presence, not current edge, so prices moving post-bet-placement
+  // don't cause a bet to silently disappear from the display.
   const allWeekendBets = predictions
-    .filter((p) => p.edge >= 0.05)
+    .filter((p) => p.has_bet)
     .sort((a, b) => {
       const marketOrder: Partial<Record<MarketType, number>> = { race_winner: 0, pole: 1, podium: 2 };
       const mDiff = (marketOrder[a.market_type] ?? 9) - (marketOrder[b.market_type] ?? 9);
@@ -54,7 +56,7 @@ export default function RaceView({ race, predictions }: Props) {
   // Bet counts per market tab
   const betCountByMarket: Partial<Record<MarketType, number>> = {};
   for (const p of predictions) {
-    if (p.edge >= 0.05) betCountByMarket[p.market_type] = (betCountByMarket[p.market_type] ?? 0) + 1;
+    if (p.has_bet) betCountByMarket[p.market_type] = (betCountByMarket[p.market_type] ?? 0) + 1;
   }
 
   // Context-aware status label based on race date
@@ -221,7 +223,7 @@ export default function RaceView({ race, predictions }: Props) {
               </thead>
               <tbody>
                 {displayRows.map((row, i) => {
-                  const hasBet = row.edge >= 0.05;
+                  const hasBet = row.has_bet;
                   const rowBg = hasBet ? "rgba(16,185,129,0.06)" : (i % 2 === 0 ? "#0A0A0A" : "#0C0C0E");
                   const abbrev = abbrevFromTicker(row.kalshi_ticker);
                   const showKalshi = row.kalshi_mid_price > 0 && row.kalshi_mid_price < 0.94;

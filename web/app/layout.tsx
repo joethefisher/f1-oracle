@@ -18,8 +18,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <header style={{ background: "#100D0B" }}>
           <div style={{ maxWidth: 1100, margin: "0 auto", padding: "32px 32px 0" }}>
             <div style={{ display: "flex", alignItems: "baseline", gap: 14 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                <img src="/f1-oracle/F1.svg" alt="F1" style={{ height: 22, width: "auto" }} />
+              <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
+                <span style={{ fontWeight: 800, fontSize: 26, color: "#E8002D", letterSpacing: "-0.02em", lineHeight: 1 }}>F1</span>
                 <span style={{ fontWeight: 600, fontSize: 26, color: "#FAFAFA", letterSpacing: "-0.02em", lineHeight: 1 }}>Oracle</span>
               </div>
               <span style={{ color: "#52525B", fontSize: 13 }}>ML Model vs Kalshi F1 Fans</span>

@@ -101,6 +101,7 @@ def qualifying_results_exist(race_id: int) -> bool:
 
 
 def predictions_exist(race_id: int) -> bool:
+    from tools.db import cursor
     from tools.train_model import MODEL_VERSION
     with cursor() as cur:
         cur.execute("""

@@ -32,7 +32,7 @@ _TARGET_COL = {
     "sprint": "sprint",
 }
 
-MODEL_DIR = Path(__file__).parent.parent / ".tmp" / "models"
+MODEL_DIR = Path(__file__).parent.parent / "models"
 
 
 def train(X: np.ndarray, y: np.ndarray) -> CalibratedClassifierCV:

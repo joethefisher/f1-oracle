@@ -3,7 +3,7 @@ name: F1 Oracle — Race Weekend Automation
 on:
   schedule:
     # Race weekend window: every 30 min Thu–Sun (UTC)
-    - cron: "*/30 * * * 4-7"
+    - cron: "*/30 * * * 0,4,5,6"
     # Early-week: once daily Mon–Wed to catch markets opening ~7 days pre-race
     - cron: "0 9 * * 1,2,3"
   workflow_dispatch:

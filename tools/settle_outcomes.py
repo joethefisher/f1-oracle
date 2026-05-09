@@ -54,20 +54,22 @@ def compute_pnl(bet_size: float, kalshi_mid: float, won: bool) -> float:
 
 
 def settle_race(race_id: int):
-    """Query DB, match results to virtual bets, write outcomes."""
+    """Write outcomes for all markets in a race using race/qualifying results.
+
+    Settles every market that has a prediction, regardless of whether a virtual
+    bet was placed. This keeps the outcomes table complete for calibration and
+    the UI, not just for P&L accounting.
+    """
     from tools.db import cursor
 
     with cursor() as cur:
         cur.execute("""
-            SELECT m.id, m.market_type, m.driver_abbreviation,
-                   p.id AS pred_id, p.kalshi_mid_price,
-                   vb.id AS bet_id, vb.bet_size_dollars
+            SELECT DISTINCT m.id, m.market_type, m.driver_abbreviation
             FROM markets m
             JOIN predictions p ON p.market_id = m.id AND p.model_version = %s
-            JOIN virtual_bets vb ON vb.prediction_id = p.id
             WHERE m.race_id = %s
         """, (MODEL_VERSION, race_id,))
-        bets = cur.fetchall()
+        markets = cur.fetchall()
 
         cur.execute(
             "SELECT abbreviation, position FROM race_results WHERE race_id = %s AND position IS NOT NULL",
@@ -81,11 +83,13 @@ def settle_race(race_id: int):
         )
         quali_results = {r[0]: r[1] for r in cur.fetchall()}
 
+    if not race_results and not quali_results:
+        console.print(f"[yellow]No race/qualifying results in DB for race {race_id} — skipping[/]")
+        return
+
     settled = 0
     with cursor() as cur:
-        for row in bets:
-            market_id, market_type, abbrev, pred_id, kalshi_mid, bet_id, bet_size = row
-
+        for market_id, market_type, abbrev in markets:
             won = determine_winner(
                 market_type,
                 abbrev or "",

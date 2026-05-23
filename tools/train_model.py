@@ -23,6 +23,16 @@ FEATURE_COLS = [
     "is_wet",
 ]
 
+# Pole is predicted BEFORE qualifying, so it cannot use grid position (that *is*
+# the qualifying result). The pole model uses only pre-qualifying signal.
+FEATURE_COLS_POLE = [
+    "driver_elo",
+    "constructor_elo",
+    "circuit_history",
+    "is_street_circuit",
+    "is_wet",
+]
+
 MODEL_VERSION = "v2"
 
 _TARGET_COL = {
@@ -31,6 +41,11 @@ _TARGET_COL = {
     "pole": "pole",
     "sprint": "sprint",
 }
+
+
+def feature_cols_for(market_type: str) -> list[str]:
+    """Feature columns for a market. Pole drops grid (predicted pre-qualifying)."""
+    return FEATURE_COLS_POLE if market_type == "pole" else FEATURE_COLS
 
 MODEL_DIR = Path(__file__).parent.parent / "models"
 
@@ -59,7 +74,7 @@ def load_model(market_type: str, model_dir: Path = MODEL_DIR) -> CalibratedClass
 
 def train_market_model(df: pd.DataFrame, market_type: str) -> CalibratedClassifierCV:
     target = _TARGET_COL[market_type]
-    X = df[FEATURE_COLS].values.astype(float)
+    X = df[feature_cols_for(market_type)].values.astype(float)
     y = df[target].values
     return train(X, y)
 

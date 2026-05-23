@@ -11,8 +11,10 @@ import pandas as pd
 from rich.console import Console
 
 from tools.db import cursor
-from tools.build_features import build_race_features
-from tools.train_model import FEATURE_COLS, MODEL_VERSION, load_model
+from tools.build_features import build_race_features, build_prequali_features
+from tools.train_model import (
+    FEATURE_COLS, FEATURE_COLS_POLE, MODEL_VERSION, load_model, feature_cols_for,
+)
 from tools.elo import get_driver_elo_snapshot, get_constructor_elo_snapshot
 from tools.team_rosters import TEAM_ROSTERS
 from tools.place_virtual_bets import compute_bets, save_bets
@@ -38,8 +40,9 @@ def normalize_probabilities(raw_probs: np.ndarray, target: float = 1.0) -> np.nd
     return raw_probs / total * target
 
 
-def predict_race(features_df: pd.DataFrame, model, target_sum: float = 1.0) -> list[dict]:
-    X = features_df[FEATURE_COLS].values.astype(float)
+def predict_race(features_df: pd.DataFrame, model, target_sum: float = 1.0,
+                 feature_cols: list[str] = FEATURE_COLS) -> list[dict]:
+    X = features_df[feature_cols].values.astype(float)
     raw_probs = model.predict_proba(X)[:, 1]
     normalized = normalize_probabilities(raw_probs, target_sum)
     results = [
@@ -269,77 +272,131 @@ def run_race(season: int, round_num: int, market_types: list[str], is_wet: bool 
             console.print(f"[red]Model not found for {market_type}. Run build_training_data first.[/]")
             continue
 
-        preds = predict_race(features, model, MARKET_TARGET_SUM.get(market_type, 1.0))
-
-        market_abbrev_map = get_markets_for_race(race_id, market_type)
-        if not market_abbrev_map:
-            console.print(f"[yellow]No open markets in DB for {market_type}. Run save_markets first.[/]")
-            continue
-
-        kalshi_mid_map = get_kalshi_mids(race_id, market_type)
-
-        pred_id_map = save_predictions_and_get_ids(
-            market_abbrev_map, preds, kalshi_mid_map
+        preds = predict_race(
+            features, model, MARKET_TARGET_SUM.get(market_type, 1.0),
+            feature_cols=feature_cols_for(market_type),
         )
-        console.print(f"Saved {len(pred_id_map)} predictions (model_version={MODEL_VERSION})")
+        _save_and_bet_market(race_id, market_type, preds, bankroll)
 
-        # Validate the probability distribution before risking any bets. Predictions
-        # are already stored (the public site shows them); a failure here only blocks
-        # betting for this market — unless STRICT_VALIDATION is set, which aborts.
-        problems = validate_distribution(
-            market_type, [p["probability"] for p in preds],
-            MARKET_TARGET_SUM.get(market_type, 1.0),
-        )
-        if problems:
-            for prob in problems:
-                console.print(f"[red]VALIDATION FAIL: {prob}[/]")
-            if is_strict():
-                raise ValidationError("; ".join(problems))
-            console.print(f"[yellow]Skipping bets for {market_type} (validation failed)[/]")
+
+def _save_and_bet_market(race_id: int, market_type: str, preds: list[dict], bankroll: float):
+    """Persist predictions for a market, then place price-guarded half-Kelly bets.
+
+    Shared by the post-qualifying run (race_winner/podium) and the pre-qualifying
+    pole run. Predictions are always stored; a validation failure or a missing
+    live price blocks only the betting.
+    """
+    market_abbrev_map = get_markets_for_race(race_id, market_type)
+    if not market_abbrev_map:
+        console.print(f"[yellow]No open markets in DB for {market_type}. Run save_markets first.[/]")
+        return
+
+    kalshi_mid_map = get_kalshi_mids(race_id, market_type)
+    pred_id_map = save_predictions_and_get_ids(market_abbrev_map, preds, kalshi_mid_map)
+    console.print(f"Saved {len(pred_id_map)} predictions (model_version={MODEL_VERSION})")
+
+    # Validate the probability distribution before risking any bets. Predictions
+    # are already stored (the public site shows them); a failure here only blocks
+    # betting for this market — unless STRICT_VALIDATION is set, which aborts.
+    problems = validate_distribution(
+        market_type, [p["probability"] for p in preds],
+        MARKET_TARGET_SUM.get(market_type, 1.0),
+    )
+    if problems:
+        for prob in problems:
+            console.print(f"[red]VALIDATION FAIL: {prob}[/]")
+        if is_strict():
+            raise ValidationError("; ".join(problems))
+        console.print(f"[yellow]Skipping bets for {market_type} (validation failed)[/]")
+        return
+
+    # Only markets with a real live price are bet candidates. A missing or
+    # degenerate (0 or 1) price means no bet — never wager on a phantom price.
+    bet_inputs = []
+    skipped_no_price = 0
+    for p in preds:
+        market_id = market_abbrev_map.get(p["abbreviation"])
+        if market_id is None:
             continue
+        mid = kalshi_mid_map.get(market_id)
+        if mid is None or not (0 < mid < 1):
+            skipped_no_price += 1
+            continue
+        bet_inputs.append({
+            "abbreviation": p["abbreviation"],
+            "market_id": market_id,
+            "oracle_probability": p["probability"],
+            "kalshi_mid": mid,
+        })
+    if skipped_no_price:
+        console.print(f"[yellow]{skipped_no_price} market(s) had no live price — not betting them[/]")
+    bets = compute_bets(bet_inputs, bankroll)
+    n_bets = sum(1 for b in bets if b["bet_size"] > 0)
+    purged = purge_stale_bets(race_id)
+    if purged:
+        console.print(f"[yellow]Purged {purged} stale bets from other model versions[/]")
+    save_bets(bets, pred_id_map)
+    console.print(f"[green]Placed {n_bets} bets (edge ≥ {MIN_EDGE*100:.0f}%)[/]")
 
-        # Only markets with a real live price are bet candidates. A missing or
-        # degenerate (0 or 1) price means no bet — never wager on a phantom price.
-        bet_inputs = []
-        skipped_no_price = 0
-        for p in preds:
-            market_id = market_abbrev_map.get(p["abbreviation"])
-            if market_id is None:
-                continue
-            mid = kalshi_mid_map.get(market_id)
-            if mid is None or not (0 < mid < 1):
-                skipped_no_price += 1
-                continue
-            bet_inputs.append({
-                "abbreviation": p["abbreviation"],
-                "market_id": market_id,
-                "oracle_probability": p["probability"],
-                "kalshi_mid": mid,
-            })
-        if skipped_no_price:
-            console.print(f"[yellow]{skipped_no_price} market(s) had no live price — not betting them[/]")
-        bets = compute_bets(bet_inputs, bankroll)
-        n_bets = sum(1 for b in bets if b["bet_size"] > 0)
-        purged = purge_stale_bets(race_id)
-        if purged:
-            console.print(f"[yellow]Purged {purged} stale bets from other model versions[/]")
-        save_bets(bets, pred_id_map)
-        console.print(f"[green]Placed {n_bets} bets (edge ≥ {MIN_EDGE*100:.0f}%)[/]")
+    for p in preds[:5]:
+        abbrev = p["abbreviation"]
+        market_id = market_abbrev_map.get(abbrev, 0)
+        mid = kalshi_mid_map.get(market_id)
+        if mid is None or not (0 < mid < 1):
+            console.print(f"  {abbrev:4s}  oracle={p['probability']*100:.1f}%  kalshi=— (no price)")
+            continue
+        edge = p["probability"] - mid
+        console.print(
+            f"  {abbrev:4s}  oracle={p['probability']*100:.1f}%  "
+            f"kalshi={mid*100:.1f}%  edge={edge*100:+.1f}%"
+        )
 
-        for p in preds[:5]:
-            abbrev = p["abbreviation"]
-            market_id = market_abbrev_map.get(abbrev, 0)
-            mid = kalshi_mid_map.get(market_id)
-            if mid is None or not (0 < mid < 1):
-                console.print(
-                    f"  {abbrev:4s}  oracle={p['probability']*100:.1f}%  kalshi=— (no price)"
-                )
-                continue
-            edge = p["probability"] - mid
-            console.print(
-                f"  {abbrev:4s}  oracle={p['probability']*100:.1f}%  "
-                f"kalshi={mid*100:.1f}%  edge={edge*100:+.1f}%"
-            )
+
+def run_pole_prequali(season: int, round_num: int, is_wet: bool = False):
+    """Predict pole BEFORE qualifying, while the outcome is still uncertain.
+
+    Uses the grid-free pole model (FEATURE_COLS_POLE) over the drivers that have
+    open pole markets. Never run once qualifying is decided — that would be
+    betting a known result.
+    """
+    race_id = get_race_id(season, round_num)
+    circuit = get_race_circuit(race_id)
+    console.print(f"Pole (pre-qualifying): {season} R{round_num} — {circuit} (id={race_id})")
+
+    market_abbrev_map = get_markets_for_race(race_id, "pole")
+    if not market_abbrev_map:
+        console.print("[yellow]No open pole markets in DB. Run discovery first.[/]")
+        return
+    drivers = list(market_abbrev_map.keys())
+
+    history = load_race_history()
+    if history.empty:
+        raise RuntimeError("No historical race data in DB.")
+    quali_history = load_qualifying_history()
+    prior = history[
+        (history["season"] < season)
+        | ((history["season"] == season) & (history["round"] < round_num))
+    ]
+    driver_elo = get_driver_elo_snapshot(history, season, round_num)
+    constructor_elo = get_constructor_elo_snapshot(quali_history, season, round_num, TEAM_ROSTERS)
+
+    features = build_prequali_features(
+        results_history=prior,
+        drivers=drivers,
+        circuit=circuit,
+        current_season=season,
+        is_wet=is_wet,
+        driver_elo_snapshot=driver_elo,
+        constructor_elo_snapshot=constructor_elo,
+        team_rosters=TEAM_ROSTERS,
+    )
+    console.print(f"Built pre-quali features for {len(features)} drivers")
+
+    model = load_model("pole")
+    preds = predict_race(features, model, MARKET_TARGET_SUM.get("pole", 1.0),
+                         feature_cols=FEATURE_COLS_POLE)
+    bankroll = get_current_bankroll()
+    _save_and_bet_market(race_id, "pole", preds, bankroll)
 
 
 def main():

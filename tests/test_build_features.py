@@ -112,3 +112,47 @@ def test_build_race_features_fills_missing_circuit_history():
     )
     assert len(features) == 3
     assert not features["circuit_history"].isna().any()
+
+
+def test_build_prequali_features_has_no_grid():
+    from tools.build_features import build_prequali_features
+    results = make_results_df()
+    feats = build_prequali_features(
+        results_history=results,
+        drivers=["NOR", "VER", "LEC"],
+        circuit="Miami",
+        current_season=2026,
+    )
+    cols = set(feats.columns)
+    assert "grid_pos_norm" not in cols  # pole is predicted before qualifying
+    assert "grid_position" not in cols
+    for col in ["driver_elo", "constructor_elo", "circuit_history", "is_street_circuit", "is_wet"]:
+        assert col in cols, f"missing {col}"
+    assert len(feats) == 3
+
+
+def test_build_prequali_features_dedups_drivers():
+    from tools.build_features import build_prequali_features
+    feats = build_prequali_features(
+        results_history=make_results_df(),
+        drivers=["NOR", "NOR", "VER"],
+        circuit="Miami",
+        current_season=2026,
+    )
+    assert len(feats) == 2
+
+
+def test_build_prequali_features_empty_drivers():
+    from tools.build_features import build_prequali_features
+    feats = build_prequali_features(
+        results_history=make_results_df(), drivers=[], circuit="Miami", current_season=2026,
+    )
+    assert feats.empty
+
+
+def test_street_circuit_flag_in_prequali():
+    from tools.build_features import build_prequali_features
+    feats = build_prequali_features(
+        results_history=make_results_df(), drivers=["NOR"], circuit="Monaco", current_season=2026,
+    )
+    assert feats["is_street_circuit"].iloc[0] == 1

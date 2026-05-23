@@ -74,3 +74,12 @@ def test_feature_cols_contains_expected():
     for col in ["grid_pos_norm", "driver_elo", "constructor_elo",
                 "circuit_history", "is_street_circuit", "is_wet"]:
         assert col in FEATURE_COLS
+
+
+def test_feature_cols_for_pole_excludes_grid():
+    from tools.train_model import feature_cols_for, FEATURE_COLS, FEATURE_COLS_POLE
+    assert "grid_pos_norm" not in feature_cols_for("pole")
+    assert feature_cols_for("pole") == FEATURE_COLS_POLE
+    assert "grid_pos_norm" in feature_cols_for("race_winner")
+    assert feature_cols_for("race_winner") == FEATURE_COLS
+    assert feature_cols_for("podium") == FEATURE_COLS

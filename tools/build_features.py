@@ -101,3 +101,57 @@ def build_race_features(
     )
 
     return df.reset_index()
+
+
+def build_prequali_features(
+    results_history: pd.DataFrame,
+    drivers: list[str],
+    circuit: str,
+    current_season: int,
+    is_wet: bool = False,
+    driver_elo_snapshot: dict[str, float] | None = None,
+    constructor_elo_snapshot: dict[str, float] | None = None,
+    team_rosters: dict[tuple[int, str], str] | None = None,
+) -> pd.DataFrame:
+    """
+    Pre-qualifying feature matrix for the pole model — the same v2 features
+    EXCEPT grid position, which isn't known before qualifying. Driver universe is
+    supplied explicitly (e.g. the drivers with open pole markets).
+
+    Columns: driver_elo, constructor_elo, circuit_history, is_street_circuit, is_wet
+    (see FEATURE_COLS_POLE in train_model).
+    """
+    base = pd.DataFrame({"abbreviation": list(dict.fromkeys(drivers))})
+    if base.empty:
+        return base
+
+    if driver_elo_snapshot:
+        d_elo = base["abbreviation"].map(lambda a: driver_elo_snapshot.get(a, STARTING_ELO))
+    else:
+        d_elo = STARTING_ELO
+
+    if constructor_elo_snapshot and team_rosters:
+        def _cons_elo(abbrev: str) -> float:
+            constructor = team_rosters.get((current_season, abbrev))
+            if constructor:
+                return constructor_elo_snapshot.get(constructor, STARTING_ELO)
+            return STARTING_ELO
+        c_elo = base["abbreviation"].map(_cons_elo)
+    else:
+        c_elo = STARTING_ELO
+
+    drivers_df = base.assign(driver_elo=d_elo, constructor_elo=c_elo)
+
+    circuit_hist = compute_circuit_history(results_history, circuit, current_season)
+    df = drivers_df.set_index("abbreviation").join(circuit_hist, how="left")
+
+    hist_vals = pd.to_numeric(df["circuit_history"], errors="coerce")
+    # No grid to anchor the fill; use the field's own median, else a midpack finish.
+    fill = hist_vals.median() if hist_vals.notna().any() else 10.0
+    df = df.assign(
+        circuit_history=hist_vals.fillna(fill),
+        is_street_circuit=int(circuit in STREET_CIRCUITS),
+        is_wet=int(is_wet),
+    )
+
+    return df.reset_index()

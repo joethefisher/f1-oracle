@@ -39,6 +39,9 @@ SERIES_MARKET_TYPES: dict[str, str] = {
 }
 
 ALL_MARKET_TYPES = ["race_winner", "podium", "pole"]
+# Pole is predicted pre-qualifying (see run_pole_prequali); the post-qualifying
+# model run covers only the markets that still hinge on the race itself.
+POST_QUALI_MARKET_TYPES = ["race_winner", "podium"]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -56,6 +59,14 @@ def markets_exist_for_race(race_id: int) -> bool:
     return _count("SELECT COUNT(*) FROM markets WHERE race_id = %s", (race_id,)) > 0
 
 
+def market_types_present(race_id: int) -> set[str]:
+    """Distinct market_types already saved for a race (for incremental discovery)."""
+    from tools.db import cursor
+    with cursor() as cur:
+        cur.execute("SELECT DISTINCT market_type FROM markets WHERE race_id = %s", (race_id,))
+        return {r[0] for r in cur.fetchall()}
+
+
 def qualifying_results_exist(race_id: int) -> bool:
     return _count(
         "SELECT COUNT(*) FROM qualifying_results WHERE race_id = %s AND position IS NOT NULL",
@@ -63,15 +74,20 @@ def qualifying_results_exist(race_id: int) -> bool:
     ) > 0
 
 
-def predictions_exist(race_id: int) -> bool:
+def predictions_exist(race_id: int, market_type: str | None = None) -> bool:
     from tools.db import cursor
     from tools.train_model import MODEL_VERSION
+    sql = """
+        SELECT COUNT(*) FROM predictions p
+        JOIN markets m ON p.market_id = m.id
+        WHERE m.race_id = %s AND p.model_version = %s
+    """
+    params: tuple = (race_id, MODEL_VERSION)
+    if market_type is not None:
+        sql += " AND m.market_type = %s"
+        params = (race_id, MODEL_VERSION, market_type)
     with cursor() as cur:
-        cur.execute("""
-            SELECT COUNT(*) FROM predictions p
-            JOIN markets m ON p.market_id = m.id
-            WHERE m.race_id = %s AND p.model_version = %s
-        """, (race_id, MODEL_VERSION))
+        cur.execute(sql, params)
         return cur.fetchone()[0] > 0
 
 
@@ -152,6 +168,18 @@ def in_market_discovery_window(race: dict) -> bool:
     if not race_dt.tzinfo:
         race_dt = race_dt.replace(tzinfo=timezone.utc)
     return now_utc() >= race_dt - timedelta(days=8)
+
+
+def in_prequali_window(race: dict) -> bool:
+    """Pre-qualifying pole window: from T-8d up to the qualifying window (T-28h).
+
+    Pole is predicted here while the outcome is still uncertain. Once qualifying
+    is imminent/decided we stop — never bet a resolved session.
+    """
+    race_dt = race["race_date_utc"]
+    if not race_dt.tzinfo:
+        race_dt = race_dt.replace(tzinfo=timezone.utc)
+    return race_dt - timedelta(days=8) <= now_utc() <= race_dt - timedelta(hours=28)
 
 
 def in_qualifying_window(race: dict) -> bool:
@@ -249,8 +277,11 @@ def discover_and_save_markets(race: dict) -> int:
     if not is_sprint:
         series_to_check = [(s, m) for s, m in series_to_check if m != "sprint"]
 
-    # Deduplicate: if two series map to the same market_type, use whichever finds a ticker first
-    seen_market_types: set[str] = set()
+    # Skip market types already saved for this race, so discovery is incremental:
+    # each run fills in only the still-missing types (e.g. pole opening later than
+    # race_winner) instead of running once and never retrying. Also dedups when two
+    # series map to the same market_type.
+    seen_market_types: set[str] = market_types_present(race_id)
     total_saved = 0
 
     for series_ticker, market_type in series_to_check:
@@ -418,18 +449,19 @@ def orchestrate(race_id: int | None = None):
     if hasattr(race_dt, "tzinfo") and not race_dt.tzinfo:
         race_dt = race_dt.replace(tzinfo=timezone.utc)
 
-    # ── 1. Market discovery ────────────────────────────────────────────────
-    if not markets_exist_for_race(rid) and race["status"] != "completed":
-        if in_market_discovery_window(race):
-            log.info("Step: discover Kalshi markets")
-            n = discover_and_save_markets(race)
-            log.info("Market discovery: saved %d market entries", n)
-        else:
-            log.info("Market discovery window not open yet (race is %s)", race_dt.date())
-    elif race["status"] == "completed" and not markets_exist_for_race(rid):
-        log.info("Race already completed with no markets — skipping discovery")
+    # ── 1. Market discovery (incremental — fills in still-missing types) ────
+    expected_types = set(ALL_MARKET_TYPES) | ({"sprint"} if race["is_sprint_weekend"] else set())
+    missing_types = expected_types - market_types_present(rid)
+    if missing_types and not race_results_exist(rid) and in_market_discovery_window(race):
+        log.info("Step: discover Kalshi markets (missing: %s)", sorted(missing_types))
+        n = discover_and_save_markets(race)
+        log.info("Market discovery: saved %d market entries", n)
+    elif not missing_types:
+        log.info("All market types present — skipping discovery")
+    elif race_results_exist(rid):
+        log.info("Race already run — skipping discovery of %s", sorted(missing_types))
     else:
-        log.info("Markets exist — skipping discovery")
+        log.info("Market discovery window not open yet (race is %s)", race_dt.date())
 
     # ── 2. Orderbook snapshot + price refresh ──────────────────────────────
     if markets_exist_for_race(rid):
@@ -460,8 +492,28 @@ def orchestrate(race_id: int | None = None):
     else:
         log.info("Qualifying results exist — skipping ingest")
 
-    # ── 4. Model run ───────────────────────────────────────────────────────
-    if qualifying_results_exist(rid) and not predictions_exist(rid):
+    # ── 3b. Pole prediction (pre-qualifying, while the outcome is uncertain) ─
+    if ("pole" in market_types_present(rid)
+            and not qualifying_results_exist(rid)
+            and not predictions_exist(rid, "pole")
+            and in_prequali_window(race)):
+        log.info("Step: run pre-qualifying pole model")
+        is_wet = get_race_weather(race["circuit"], race_dt)
+        if DRY_RUN:
+            log.info("[DRY RUN] Would run pre-quali pole for %s R%d (is_wet=%s)",
+                     race["season"], race["round"], is_wet)
+        else:
+            try:
+                from tools.run_model import run_pole_prequali
+                run_pole_prequali(race["season"], race["round"], is_wet=is_wet)
+                log.info("Pole (pre-qualifying) complete")
+            except Exception as e:
+                log.error("Pole pre-quali run failed: %s", e)
+    elif qualifying_results_exist(rid) and not predictions_exist(rid, "pole"):
+        log.info("Qualifying already decided — skipping pole (never bet a resolved session)")
+
+    # ── 4. Model run (post-qualifying: race winner + podium only) ──────────
+    if qualifying_results_exist(rid) and not predictions_exist(rid, "race_winner"):
         log.info("Step: run Oracle model")
         is_wet = get_race_weather(race["circuit"], race_dt)
         if DRY_RUN:
@@ -470,11 +522,11 @@ def orchestrate(race_id: int | None = None):
         else:
             try:
                 from tools.run_model import run_race
-                run_race(race["season"], race["round"], ALL_MARKET_TYPES, is_wet=is_wet)
+                run_race(race["season"], race["round"], POST_QUALI_MARKET_TYPES, is_wet=is_wet)
                 log.info("Model run complete")
             except Exception as e:
                 log.error("Model run failed: %s", e)
-    elif predictions_exist(rid):
+    elif predictions_exist(rid, "race_winner"):
         log.info("Predictions exist — skipping model run")
 
     # ── 5. Sprint ingest (sprint weekends only) ────────────────────────────

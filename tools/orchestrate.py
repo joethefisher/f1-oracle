@@ -398,6 +398,13 @@ def get_race_weather(circuit: str, race_date_utc) -> bool:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def orchestrate(race_id: int | None = None):
+    # Self-heal status from facts BEFORE the status-filtered target query, so a
+    # race wrongly marked 'completed' (or stuck 'upcoming') can't hide itself.
+    from tools.status import reconcile_recent_races
+    changed = reconcile_recent_races(write=not DRY_RUN)
+    if changed:
+        log.info("Reconciled race status from facts: %s", changed)
+
     race = find_target_race(race_id)
     if not race:
         log.info("No active race weekend found within 7-day window — nothing to do")

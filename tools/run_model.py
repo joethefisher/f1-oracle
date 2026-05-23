@@ -17,6 +17,7 @@ from tools.elo import get_driver_elo_snapshot, get_constructor_elo_snapshot
 from tools.team_rosters import TEAM_ROSTERS
 from tools.place_virtual_bets import compute_bets, save_bets
 from tools.portfolio import MIN_EDGE
+from tools.validate import validate_distribution, is_strict, ValidationError
 
 console = Console()
 
@@ -281,6 +282,21 @@ def run_race(season: int, round_num: int, market_types: list[str], is_wet: bool 
             market_abbrev_map, preds, kalshi_mid_map
         )
         console.print(f"Saved {len(pred_id_map)} predictions (model_version={MODEL_VERSION})")
+
+        # Validate the probability distribution before risking any bets. Predictions
+        # are already stored (the public site shows them); a failure here only blocks
+        # betting for this market — unless STRICT_VALIDATION is set, which aborts.
+        problems = validate_distribution(
+            market_type, [p["probability"] for p in preds],
+            MARKET_TARGET_SUM.get(market_type, 1.0),
+        )
+        if problems:
+            for prob in problems:
+                console.print(f"[red]VALIDATION FAIL: {prob}[/]")
+            if is_strict():
+                raise ValidationError("; ".join(problems))
+            console.print(f"[yellow]Skipping bets for {market_type} (validation failed)[/]")
+            continue
 
         # Only markets with a real live price are bet candidates. A missing or
         # degenerate (0 or 1) price means no bet — never wager on a phantom price.

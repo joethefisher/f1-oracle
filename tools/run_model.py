@@ -19,6 +19,7 @@ from tools.elo import get_driver_elo_snapshot, get_constructor_elo_snapshot
 from tools.team_rosters import TEAM_ROSTERS
 from tools.place_virtual_bets import compute_bets, save_bets
 from tools.portfolio import MIN_EDGE
+from tools.kelly_portfolio import size_portfolio
 from tools.validate import validate_distribution, is_strict, ValidationError
 
 console = Console()
@@ -264,6 +265,8 @@ def run_race(season: int, round_num: int, market_types: list[str], is_wet: bool 
     bankroll = get_current_bankroll()
     console.print(f"Current bankroll: ${bankroll:.2f}")
 
+    market_preds: dict[str, list[dict]] = {}
+    contexts = []
     for market_type in market_types:
         console.print(f"\n[bold]→ {market_type}[/]")
         try:
@@ -276,28 +279,60 @@ def run_race(season: int, round_num: int, market_types: list[str], is_wet: bool 
             features, model, MARKET_TARGET_SUM.get(market_type, 1.0),
             feature_cols=feature_cols_for(market_type),
         )
-        _save_and_bet_market(race_id, market_type, preds, bankroll)
+        market_preds[market_type] = preds
+        ctx = _save_and_validate_market(race_id, market_type, preds)
+        if ctx:
+            contexts.append(ctx)
+
+    # Race ordering is driven by win probabilities; race_winner + podium are sized
+    # jointly off that shared ordering. Fall back to the first available market.
+    strengths = _strengths_from(market_preds.get("race_winner") or next(iter(market_preds.values()), []))
+    _place_batch_bets(race_id, contexts, strengths, bankroll)
 
 
-def _save_and_bet_market(race_id: int, market_type: str, preds: list[dict], bankroll: float):
-    """Persist predictions for a market, then place price-guarded half-Kelly bets.
+def _strengths_from(preds: list[dict]) -> dict[str, float]:
+    return {p["abbreviation"]: p["probability"] for p in preds}
 
-    Shared by the post-qualifying run (race_winner/podium) and the pre-qualifying
-    pole run. Predictions are always stored; a validation failure or a missing
-    live price blocks only the betting.
+
+def _clear_bets_for_markets(race_id: int, market_types: list[str]) -> int:
+    """Delete current-version bets for a race within the given market types.
+
+    Lets bet placement be fully idempotent: re-running replaces the batch instead
+    of leaving behind bets the optimizer no longer selects.
+    """
+    if not market_types:
+        return 0
+    with cursor() as cur:
+        cur.execute("""
+            DELETE FROM virtual_bets
+            WHERE prediction_id IN (
+                SELECT p.id FROM predictions p
+                JOIN markets m ON p.market_id = m.id
+                WHERE m.race_id = %s AND p.model_version = %s
+                  AND m.market_type = ANY(%s)
+            )
+        """, (race_id, MODEL_VERSION, market_types))
+        return cur.rowcount
+
+
+def _save_and_validate_market(race_id: int, market_type: str, preds: list[dict]) -> dict | None:
+    """Persist a market's predictions and validate them.
+
+    Returns a betting context (markets/prices/prediction ids) when the market is
+    safe to bet, or None when there are no markets or validation failed. Predictions
+    are always stored (the public site shows them) regardless of the return value.
     """
     market_abbrev_map = get_markets_for_race(race_id, market_type)
     if not market_abbrev_map:
         console.print(f"[yellow]No open markets in DB for {market_type}. Run save_markets first.[/]")
-        return
+        return None
 
     kalshi_mid_map = get_kalshi_mids(race_id, market_type)
     pred_id_map = save_predictions_and_get_ids(market_abbrev_map, preds, kalshi_mid_map)
     console.print(f"Saved {len(pred_id_map)} predictions (model_version={MODEL_VERSION})")
 
-    # Validate the probability distribution before risking any bets. Predictions
-    # are already stored (the public site shows them); a failure here only blocks
-    # betting for this market — unless STRICT_VALIDATION is set, which aborts.
+    # Validate the probability distribution before risking any bets. A failure
+    # blocks only betting for this market — unless STRICT_VALIDATION is set.
     problems = validate_distribution(
         market_type, [p["probability"] for p in preds],
         MARKET_TARGET_SUM.get(market_type, 1.0),
@@ -308,47 +343,86 @@ def _save_and_bet_market(race_id: int, market_type: str, preds: list[dict], bank
         if is_strict():
             raise ValidationError("; ".join(problems))
         console.print(f"[yellow]Skipping bets for {market_type} (validation failed)[/]")
-        return
+        return None
 
-    # Only markets with a real live price are bet candidates. A missing or
-    # degenerate (0 or 1) price means no bet — never wager on a phantom price.
-    bet_inputs = []
+    return {
+        "market_type": market_type,
+        "preds": preds,
+        "market_abbrev_map": market_abbrev_map,
+        "kalshi_mid_map": kalshi_mid_map,
+        "pred_id_map": pred_id_map,
+    }
+
+
+def _place_batch_bets(race_id: int, contexts: list[dict], strengths: dict[str, float],
+                      bankroll: float):
+    """Size and persist a correlated batch of bets with joint half-Kelly.
+
+    Builds candidate bets across all validated markets, sizes them jointly off a
+    simulated finishing order (so correlated podium/winner bets aren't over-staked),
+    and writes the non-zero stakes. A missing/degenerate price is never a candidate.
+    """
+    candidates = []
     skipped_no_price = 0
-    for p in preds:
-        market_id = market_abbrev_map.get(p["abbreviation"])
-        if market_id is None:
-            continue
-        mid = kalshi_mid_map.get(market_id)
-        if mid is None or not (0 < mid < 1):
-            skipped_no_price += 1
-            continue
-        bet_inputs.append({
-            "abbreviation": p["abbreviation"],
-            "market_id": market_id,
-            "oracle_probability": p["probability"],
-            "kalshi_mid": mid,
-        })
+    for ctx in contexts:
+        for p in ctx["preds"]:
+            market_id = ctx["market_abbrev_map"].get(p["abbreviation"])
+            if market_id is None:
+                continue
+            mid = ctx["kalshi_mid_map"].get(market_id)
+            if mid is None or not (0 < mid < 1):
+                skipped_no_price += 1
+                continue
+            candidates.append({
+                "market_type": ctx["market_type"],
+                "driver": p["abbreviation"],
+                "price": mid,
+                "oracle_prob": p["probability"],
+                "market_id": market_id,
+                "prediction_id": ctx["pred_id_map"].get(market_id),
+            })
     if skipped_no_price:
         console.print(f"[yellow]{skipped_no_price} market(s) had no live price — not betting them[/]")
-    bets = compute_bets(bet_inputs, bankroll)
-    n_bets = sum(1 for b in bets if b["bet_size"] > 0)
+    if not candidates:
+        console.print("[yellow]No bettable candidates.[/]")
+        return
+
+    sized = size_portfolio(candidates, strengths, bankroll)
+
+    bets, pred_id_map = [], {}
+    for s in sized:
+        if s["bet_size"] > 0 and s.get("prediction_id") is not None:
+            bets.append({
+                "market_id": s["market_id"],
+                "bet_size": s["bet_size"],
+                "kelly_fraction": s["fraction"],
+                "bankroll_at_time": bankroll,
+            })
+            pred_id_map[s["market_id"]] = s["prediction_id"]
+
     purged = purge_stale_bets(race_id)
     if purged:
         console.print(f"[yellow]Purged {purged} stale bets from other model versions[/]")
+    # Clear this batch's existing bets so markets the optimizer no longer selects
+    # (e.g. a bet whose edge has decayed) don't linger. Scoped to the batch's
+    # market types, so pole bets placed in a separate pre-quali phase survive.
+    batch_types = sorted({ctx["market_type"] for ctx in contexts})
+    cleared = _clear_bets_for_markets(race_id, batch_types)
+    if cleared:
+        console.print(f"[yellow]Cleared {cleared} prior {batch_types} bets before re-sizing[/]")
     save_bets(bets, pred_id_map)
-    console.print(f"[green]Placed {n_bets} bets (edge ≥ {MIN_EDGE*100:.0f}%)[/]")
-
-    for p in preds[:5]:
-        abbrev = p["abbreviation"]
-        market_id = market_abbrev_map.get(abbrev, 0)
-        mid = kalshi_mid_map.get(market_id)
-        if mid is None or not (0 < mid < 1):
-            console.print(f"  {abbrev:4s}  oracle={p['probability']*100:.1f}%  kalshi=— (no price)")
+    total = sum(b["bet_size"] for b in bets)
+    console.print(
+        f"[green]Placed {len(bets)} joint half-Kelly bets — "
+        f"${total:.2f} staked ({total / bankroll * 100:.1f}% of bankroll)[/]"
+    )
+    for s in sorted(sized, key=lambda x: x["bet_size"], reverse=True):
+        if s["bet_size"] <= 0:
             continue
-        edge = p["probability"] - mid
+        edge = s["oracle_prob"] - s["price"]
         console.print(
-            f"  {abbrev:4s}  oracle={p['probability']*100:.1f}%  "
-            f"kalshi={mid*100:.1f}%  edge={edge*100:+.1f}%"
+            f"  {s['market_type']:11s} {s['driver']:4s}  oracle={s['oracle_prob']*100:.1f}%  "
+            f"kalshi={s['price']*100:.1f}%  edge={edge*100:+.1f}%  bet=${s['bet_size']:.2f}"
         )
 
 
@@ -396,7 +470,11 @@ def run_pole_prequali(season: int, round_num: int, is_wet: bool = False):
     preds = predict_race(features, model, MARKET_TARGET_SUM.get("pole", 1.0),
                          feature_cols=FEATURE_COLS_POLE)
     bankroll = get_current_bankroll()
-    _save_and_bet_market(race_id, "pole", preds, bankroll)
+    ctx = _save_and_validate_market(race_id, "pole", preds)
+    if ctx:
+        # Pole is its own correlated batch (one pole-sitter); strengths are the
+        # pole probabilities themselves.
+        _place_batch_bets(race_id, [ctx], _strengths_from(preds), bankroll)
 
 
 def main():

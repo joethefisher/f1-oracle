@@ -131,12 +131,20 @@ def load_session(season: int, round_num: int, session_type: str):
     return session
 
 
-def upsert_race(season: int, round_num: int, session, session_type: str = "R") -> int:
+def upsert_race(season: int, round_num: int, session, session_type: str = "R",
+                has_results: bool = True) -> int:
     name = get_race_name(session)
     circuit = get_circuit(session)
     race_date = session.date.isoformat() if hasattr(session.date, "isoformat") else str(session.date)
-    # Only mark completed when ingesting the race session itself, not qualifying
-    new_status = "completed" if session_type == "R" else "active"
+    # Only mark completed when ingesting the race session itself AND it returned
+    # finishing positions. A future/in-progress race can load an empty R session
+    # (FastF1/Jolpica return no rows) — marking it 'completed' there wrongly hides
+    # the race from the orchestrator and the GitHub Actions gate. Treat that as
+    # 'active' (weekend in progress) instead.
+    if session_type == "R":
+        new_status = "completed" if has_results else "active"
+    else:
+        new_status = "active"
 
     with cursor() as cur:
         cur.execute("""
@@ -214,9 +222,9 @@ def ingest(season: int, round_num: int, session_type: str = "R"):
     else:
         rows = parse_results_race(session, season, round_num)
 
-    race_id = upsert_race(season, round_num, session, session_type)
-    upsert_results(rows, race_id, session_type)
     n_with_pos = sum(1 for r in rows if r["position"] is not None)
+    race_id = upsert_race(season, round_num, session, session_type, has_results=n_with_pos > 0)
+    upsert_results(rows, race_id, session_type)
     console.print(f"[green]Ingested {season} R{round_num} ({session_type}) — {len(rows)} drivers, {n_with_pos} with position[/]")
 
 

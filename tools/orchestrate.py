@@ -323,6 +323,37 @@ def discover_and_save_markets(race: dict) -> int:
 # Orderbook snapshot + price refresh
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _best_price(levels: list) -> float | None:
+    """Best (highest) resting bid price from a list of [price, size] levels.
+
+    Kalshi's `orderbook_fp` returns prices as dollar strings (e.g. "0.3100").
+    Taking the max is robust to whether levels are sorted ascending or descending.
+    """
+    prices = []
+    for level in levels or []:
+        try:
+            prices.append(float(level[0]))
+        except (ValueError, TypeError, IndexError):
+            continue
+    return max(prices) if prices else None
+
+
+def _parse_orderbook(data: dict):
+    """Extract (yes_bid, yes_ask, no_bid, no_ask) from a Kalshi orderbook response.
+
+    The current API returns `orderbook_fp` with `yes_dollars`/`no_dollars` (dollar
+    strings). `yes_dollars` are resting YES bids; `no_dollars` are resting NO bids.
+    The YES ask is the complement of the best NO bid (and vice versa). An empty
+    side yields None for the prices derived from it.
+    """
+    ob = data.get("orderbook_fp") or data.get("orderbook") or {}
+    yes_bid = _best_price(ob.get("yes_dollars") or ob.get("yes"))
+    no_bid  = _best_price(ob.get("no_dollars") or ob.get("no"))
+    yes_ask = (1.0 - no_bid) if no_bid is not None else None
+    no_ask  = (1.0 - yes_bid) if yes_bid is not None else None
+    return yes_bid, yes_ask, no_bid, no_ask
+
+
 def _compute_mid(yes_bid, yes_ask) -> float | None:
     bid = float(yes_bid) if yes_bid is not None else None
     ask = float(yes_ask) if yes_ask is not None else None
@@ -349,14 +380,7 @@ def snapshot_and_persist_orderbook(race_id: int) -> int:
     for market_id, ticker in markets:
         try:
             data = kalshi_get(f"/markets/{ticker}/orderbook", {"depth": 5})
-            ob = data.get("orderbook", {})
-            yes_bids = ob.get("yes", [])
-            no_bids  = ob.get("no",  [])
-
-            best_yes_bid  = yes_bids[0][0] / 100 if yes_bids else None
-            best_yes_ask  = (1.0 - no_bids[0][0] / 100) if no_bids else None
-            best_no_bid   = no_bids[0][0]  / 100 if no_bids else None
-            best_no_ask   = (1.0 - yes_bids[0][0] / 100) if yes_bids else None
+            best_yes_bid, best_yes_ask, best_no_bid, best_no_ask = _parse_orderbook(data)
             volume_24h    = data.get("market", {}).get("volume_24h_fp")
 
             if DRY_RUN:

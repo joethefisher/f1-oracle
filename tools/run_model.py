@@ -23,18 +23,24 @@ console = Console()
 STARTING_BANKROLL = 1000.0
 MARKET_TYPES = ["race_winner", "podium", "pole"]
 
+# How many drivers satisfy each market per race. Probabilities across all drivers
+# for a market must sum to this: exactly one race winner / pole-sitter, but three
+# drivers finish on the podium. Normalizing podium to 1 (instead of 3) understates
+# every driver's podium probability ~3x and suppresses all podium edges.
+MARKET_TARGET_SUM = {"race_winner": 1.0, "podium": 3.0, "pole": 1.0, "sprint": 1.0}
 
-def normalize_probabilities(raw_probs: np.ndarray) -> np.ndarray:
+
+def normalize_probabilities(raw_probs: np.ndarray, target: float = 1.0) -> np.ndarray:
     total = raw_probs.sum()
     if total == 0:
-        return np.ones_like(raw_probs) / len(raw_probs)
-    return raw_probs / total
+        return np.full_like(raw_probs, target / len(raw_probs))
+    return raw_probs / total * target
 
 
-def predict_race(features_df: pd.DataFrame, model) -> list[dict]:
+def predict_race(features_df: pd.DataFrame, model, target_sum: float = 1.0) -> list[dict]:
     X = features_df[FEATURE_COLS].values.astype(float)
     raw_probs = model.predict_proba(X)[:, 1]
-    normalized = normalize_probabilities(raw_probs)
+    normalized = normalize_probabilities(raw_probs, target_sum)
     results = [
         {"abbreviation": row["abbreviation"], "probability": round(float(p), 6)}
         for row, p in zip(features_df.to_dict("records"), normalized)
@@ -257,7 +263,7 @@ def run_race(season: int, round_num: int, market_types: list[str], is_wet: bool 
             console.print(f"[red]Model not found for {market_type}. Run build_training_data first.[/]")
             continue
 
-        preds = predict_race(features, model)
+        preds = predict_race(features, model, MARKET_TARGET_SUM.get(market_type, 1.0))
 
         market_abbrev_map = get_markets_for_race(race_id, market_type)
         if not market_abbrev_map:

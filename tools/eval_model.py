@@ -62,53 +62,141 @@ def calibration_buckets(probs, actuals):
     return buckets
 
 
-def eval_race(race_id: int, model_version: str = MODEL_VERSION):
-    from tools.db import cursor
+def _load_eval_rows(race_id: int, model_version: str):
+    """Load aligned (oracle, kalshi, actual, market_type) rows for a race.
 
+    Only predictions with a live Kalshi price are included, so Oracle and Kalshi
+    are compared on the same set (predictions with no price aren't bettable and
+    have nothing to compare against).
+    """
+    from tools.db import cursor
     with cursor() as cur:
-        cur.execute(
-            "SELECT id, name FROM races WHERE id = %s", (race_id,)
-        )
+        cur.execute("SELECT id, name FROM races WHERE id = %s", (race_id,))
         race = cur.fetchone()
         if not race:
-            console.print(f"[red]Race {race_id} not found[/]")
-            return
-
+            return None, [], [], [], []
         cur.execute(
             "SELECT oracle_probability, kalshi_mid_price, m.market_type, m.driver_abbreviation "
             "FROM predictions p JOIN markets m ON p.market_id = m.id "
-            "WHERE m.race_id = %s AND p.model_version = %s",
+            "WHERE m.race_id = %s AND p.model_version = %s AND p.kalshi_mid_price IS NOT NULL",
             (race_id, model_version),
         )
         predictions = cur.fetchall()
-
         cur.execute(
             "SELECT abbreviation, position FROM race_results WHERE race_id = %s AND position IS NOT NULL",
             (race_id,),
         )
         race_res = {r[0]: r[1] for r in cur.fetchall()}
-
         cur.execute(
             "SELECT abbreviation, position FROM qualifying_results WHERE race_id = %s AND position IS NOT NULL",
             (race_id,),
         )
         quali_res = {r[0]: r[1] for r in cur.fetchall()}
 
-    if not race_res and not quali_res:
-        console.print(f"[yellow]No race/qualifying results in DB for race {race_id}[/]")
-        return
-
-    if not predictions:
-        console.print(f"[yellow]No {model_version} predictions for race {race_id}[/]")
-        return
-
     oracle_probs, kalshi_probs, actuals, market_types = [], [], [], []
-    for oracle_p, kalshi_p, mtype, abbrev in predictions:
-        y = _actual_outcome(mtype, abbrev or "", race_res, quali_res)
-        oracle_probs.append(float(oracle_p))
-        kalshi_probs.append(float(kalshi_p))
-        actuals.append(y)
-        market_types.append(mtype)
+    if race_res or quali_res:
+        for oracle_p, kalshi_p, mtype, abbrev in predictions:
+            actuals.append(_actual_outcome(mtype, abbrev or "", race_res, quali_res))
+            oracle_probs.append(float(oracle_p))
+            kalshi_probs.append(float(kalshi_p))
+            market_types.append(mtype)
+    return race, oracle_probs, kalshi_probs, actuals, market_types
+
+
+def compute_metrics(race_id: int, model_version: str = MODEL_VERSION) -> dict:
+    """Structured per-market + overall Brier/log-loss for a settled race.
+
+    Returns {} if there are no settled, priced predictions. Shape:
+    {"overall": {n, oracle_brier, kalshi_brier, oracle_logloss, kalshi_logloss},
+     "by_market": {market_type: {...same...}}}
+    """
+    _, oracle, kalshi, actuals, mtypes = _load_eval_rows(race_id, model_version)
+    if not actuals:
+        return {}
+
+    def _metrics(idx):
+        op = [oracle[i] for i in idx]
+        kp = [kalshi[i] for i in idx]
+        ya = [actuals[i] for i in idx]
+        return {
+            "n": len(idx),
+            "oracle_brier": brier_score(op, ya),
+            "kalshi_brier": brier_score(kp, ya),
+            "oracle_logloss": log_loss(op, ya),
+            "kalshi_logloss": log_loss(kp, ya),
+        }
+
+    by_market = {
+        mt: _metrics([i for i, m in enumerate(mtypes) if m == mt])
+        for mt in sorted(set(mtypes))
+    }
+    return {"overall": _metrics(list(range(len(actuals)))), "by_market": by_market}
+
+
+def persist_metrics(race_id: int, model_version: str = MODEL_VERSION) -> int:
+    """Write per-market + overall calibration metrics to model_metrics. Idempotent."""
+    from tools.db import cursor
+    m = compute_metrics(race_id, model_version)
+    if not m:
+        console.print(f"[yellow]No settled predictions to persist for race {race_id}[/]")
+        return 0
+    rows = [("overall", m["overall"])] + list(m["by_market"].items())
+    with cursor() as cur:
+        for market_type, vals in rows:
+            cur.execute("""
+                INSERT INTO model_metrics
+                    (race_id, model_version, market_type, n,
+                     oracle_brier, kalshi_brier, oracle_logloss, kalshi_logloss)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (race_id, model_version, market_type) DO UPDATE
+                    SET n = EXCLUDED.n,
+                        oracle_brier = EXCLUDED.oracle_brier,
+                        kalshi_brier = EXCLUDED.kalshi_brier,
+                        oracle_logloss = EXCLUDED.oracle_logloss,
+                        kalshi_logloss = EXCLUDED.kalshi_logloss,
+                        computed_at = NOW()
+            """, (race_id, model_version, market_type, vals["n"],
+                  round(vals["oracle_brier"], 5), round(vals["kalshi_brier"], 5),
+                  round(vals["oracle_logloss"], 5), round(vals["kalshi_logloss"], 5)))
+    console.print(f"[green]Persisted {len(rows)} metric rows for race {race_id}[/]")
+    return len(rows)
+
+
+def metrics_trend(season: int, model_version: str = MODEL_VERSION):
+    """Print per-market Brier (Oracle vs Kalshi) across a season's rounds."""
+    from tools.db import cursor
+    with cursor() as cur:
+        cur.execute("""
+            SELECT r.round, mm.market_type, mm.oracle_brier, mm.kalshi_brier
+            FROM model_metrics mm JOIN races r ON mm.race_id = r.id
+            WHERE r.season = %s AND mm.model_version = %s AND mm.market_type != 'overall'
+            ORDER BY r.round, mm.market_type
+        """, (season, model_version))
+        rows = cur.fetchall()
+    if not rows:
+        console.print(f"[yellow]No persisted metrics for {season}[/]")
+        return
+    t = Table(title=f"{season} Brier trend (Oracle vs Kalshi) — lower is better", header_style="bold")
+    t.add_column("Round", justify="right")
+    t.add_column("Market", style="cyan")
+    t.add_column("Oracle Brier", justify="right")
+    t.add_column("Kalshi Brier", justify="right")
+    t.add_column("Edge", justify="center")
+    for rnd, mt, ob, kb in rows:
+        ob, kb = float(ob), float(kb)
+        t.add_row(str(rnd), mt, f"{ob:.4f}", f"{kb:.4f}",
+                  "[green]✓[/]" if ob < kb else "[red]✗[/]")
+    console.print(t)
+
+
+def eval_race(race_id: int, model_version: str = MODEL_VERSION):
+    race, oracle_probs, kalshi_probs, actuals, market_types = _load_eval_rows(race_id, model_version)
+    if race is None:
+        console.print(f"[red]Race {race_id} not found[/]")
+        return
+    if not actuals:
+        console.print(f"[yellow]No settled, priced {model_version} predictions for race {race_id}[/]")
+        return
 
     console.print(f"\n[bold cyan]{race[1]} — Model {model_version} Calibration[/]")
     console.print(f"  Predictions: {len(oracle_probs)} across {len(set(market_types))} market types")
@@ -192,11 +280,18 @@ def main():
     group.add_argument("--race-id", type=int)
     group.add_argument("--season", type=int)
     parser.add_argument("--model-version", default=MODEL_VERSION)
+    parser.add_argument("--persist", action="store_true", help="Persist metrics to model_metrics")
+    parser.add_argument("--trend", action="store_true", help="Show season Brier trend (with --season)")
     args = parser.parse_args()
 
     if args.race_id:
         eval_race(args.race_id, args.model_version)
+        if args.persist:
+            persist_metrics(args.race_id, args.model_version)
     else:
+        if args.trend:
+            metrics_trend(args.season, args.model_version)
+            return
         from tools.db import cursor
         with cursor() as cur:
             cur.execute(
@@ -206,6 +301,8 @@ def main():
             race_ids = [r[0] for r in cur.fetchall()]
         for rid in race_ids:
             eval_race(rid, args.model_version)
+            if args.persist:
+                persist_metrics(rid, args.model_version)
 
 
 if __name__ == "__main__":

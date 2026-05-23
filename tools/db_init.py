@@ -113,6 +113,20 @@ CREATE TABLE IF NOT EXISTS orderbook_snapshots (
     volume_24h      NUMERIC(12,2),
     snapshot_at     TIMESTAMPTZ DEFAULT NOW()
 );
+
+CREATE TABLE IF NOT EXISTS model_metrics (
+    id             SERIAL PRIMARY KEY,
+    race_id        INTEGER REFERENCES races(id),
+    model_version  TEXT NOT NULL,
+    market_type    TEXT NOT NULL,
+    n              INTEGER NOT NULL,
+    oracle_brier   NUMERIC(8,5),
+    kalshi_brier   NUMERIC(8,5),
+    oracle_logloss NUMERIC(8,5),
+    kalshi_logloss NUMERIC(8,5),
+    computed_at    TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE (race_id, model_version, market_type)
+);
 """
 
 
@@ -128,7 +142,7 @@ def init_db():
     with cursor() as cur:
         cur.execute(SCHEMA)
         cur.execute(MIGRATIONS)
-    console.print("[green]Schema created successfully (9 tables).[/]")
+    console.print("[green]Schema created successfully (10 tables).[/]")
 
 
 if __name__ == "__main__":

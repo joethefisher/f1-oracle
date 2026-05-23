@@ -121,6 +121,13 @@ def portfolio_snapshot_exists(race_id: int) -> bool:
     ) > 0
 
 
+def metrics_exist(race_id: int) -> bool:
+    return _count(
+        "SELECT COUNT(*) FROM model_metrics WHERE race_id = %s",
+        (race_id,),
+    ) > 0
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Race discovery
 # ─────────────────────────────────────────────────────────────────────────────
@@ -591,6 +598,26 @@ def orchestrate(race_id: int | None = None):
                 log.error("Portfolio update failed: %s", e)
     elif portfolio_snapshot_exists(rid):
         log.info("Portfolio snapshot exists — skipping")
+
+    # ── 9. Calibration metrics + retrain (once, after settlement) ───────────
+    if outcomes_settled(rid) and not metrics_exist(rid):
+        log.info("Step: persist calibration metrics + retrain models")
+        if DRY_RUN:
+            log.info("[DRY RUN] Would persist metrics and retrain models for race %d", rid)
+        else:
+            try:
+                from tools.eval_model import persist_metrics
+                persist_metrics(rid)
+            except Exception as e:
+                log.error("Persisting metrics failed: %s", e)
+            try:
+                from tools.retrain_model import retrain
+                retrain()
+                log.info("Models retrained from latest data")
+            except Exception as e:
+                log.error("Retrain failed: %s", e)
+    elif metrics_exist(rid):
+        log.info("Metrics persisted — skipping metrics/retrain")
 
     log.info("Orchestration complete for %s", race["name"])
 

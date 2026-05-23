@@ -46,9 +46,25 @@ python -m tools.settle_outcomes --season 2025 --round 6
 python -m tools.update_portfolio --season 2025 --round 6
 ```
 
+## Production entry point: the orchestrator
+In production the whole cycle runs via one idempotent state machine, not the
+manual steps above:
+```bash
+python -m tools.orchestrate            # decides the phase from DB facts + clock
+python -m tools.orchestrate --dry-run  # log only, no DB writes
+```
+It self-heals race status from facts, discovers missing markets incrementally,
+predicts pole **pre-qualifying** (grid-free model) and race winner + podium
+**post-qualifying**, sizes bets with correlation-aware joint half-Kelly, settles
+after the race, and persists calibration metrics + retrains once settled. The
+manual `tools.*` commands above remain useful for backfills and debugging.
+
 ## Shadow Mode (first 2–3 weekends)
 Run the full cycle but do not publish. Validate predictions look reasonable before going public.
-Watch for: probabilities sum to ~1 per market, edge signs are plausible, no NaN/0 predictions.
+Watch for: each market's probabilities sum to its **target** (1 for race winner
+and pole, **3 for podium** — three drivers finish on the podium), edge signs are
+plausible, no NaN/0 predictions. These checks are now enforced automatically by
+`tools/validate.py` before any bet is placed.
 
 ## Edge Cases
 - **Sprint weekend**: Also run `--session S` for sprint results after the sprint race.

@@ -162,8 +162,13 @@ def save_predictions_and_get_ids(
             market_id = market_abbrev_map.get(abbrev)
             if market_id is None:
                 continue
-            kalshi_mid = kalshi_mid_map.get(market_id, 0.0)
-            edge = round(pred["probability"] - kalshi_mid, 6)
+            # Store the Oracle's probability always (the public site shows it), but
+            # leave price/edge NULL when there's no live price — never invent a 0
+            # mid, which would read as a full-probability edge and trigger a bet.
+            mid = kalshi_mid_map.get(market_id)
+            has_price = mid is not None and 0 < mid < 1
+            kalshi_mid = mid if has_price else None
+            edge = round(pred["probability"] - mid, 6) if has_price else None
             cur.execute("""
                 INSERT INTO predictions
                     (market_id, oracle_probability, kalshi_mid_price, edge, model_version)
@@ -277,16 +282,26 @@ def run_race(season: int, round_num: int, market_types: list[str], is_wet: bool 
         )
         console.print(f"Saved {len(pred_id_map)} predictions (model_version={MODEL_VERSION})")
 
-        bet_inputs = [
-            {
+        # Only markets with a real live price are bet candidates. A missing or
+        # degenerate (0 or 1) price means no bet — never wager on a phantom price.
+        bet_inputs = []
+        skipped_no_price = 0
+        for p in preds:
+            market_id = market_abbrev_map.get(p["abbreviation"])
+            if market_id is None:
+                continue
+            mid = kalshi_mid_map.get(market_id)
+            if mid is None or not (0 < mid < 1):
+                skipped_no_price += 1
+                continue
+            bet_inputs.append({
                 "abbreviation": p["abbreviation"],
-                "market_id": market_abbrev_map.get(p["abbreviation"], 0),
+                "market_id": market_id,
                 "oracle_probability": p["probability"],
-                "kalshi_mid": kalshi_mid_map.get(market_abbrev_map.get(p["abbreviation"], 0), 0.0),
-            }
-            for p in preds
-            if p["abbreviation"] in market_abbrev_map
-        ]
+                "kalshi_mid": mid,
+            })
+        if skipped_no_price:
+            console.print(f"[yellow]{skipped_no_price} market(s) had no live price — not betting them[/]")
         bets = compute_bets(bet_inputs, bankroll)
         n_bets = sum(1 for b in bets if b["bet_size"] > 0)
         purged = purge_stale_bets(race_id)
@@ -298,7 +313,12 @@ def run_race(season: int, round_num: int, market_types: list[str], is_wet: bool 
         for p in preds[:5]:
             abbrev = p["abbreviation"]
             market_id = market_abbrev_map.get(abbrev, 0)
-            mid = kalshi_mid_map.get(market_id, 0.0)
+            mid = kalshi_mid_map.get(market_id)
+            if mid is None or not (0 < mid < 1):
+                console.print(
+                    f"  {abbrev:4s}  oracle={p['probability']*100:.1f}%  kalshi=— (no price)"
+                )
+                continue
             edge = p["probability"] - mid
             console.print(
                 f"  {abbrev:4s}  oracle={p['probability']*100:.1f}%  "

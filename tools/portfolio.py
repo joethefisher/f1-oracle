@@ -18,9 +18,13 @@ def kalshi_mid_price(bid: float | None, ask: float | None) -> float:
 
 def half_kelly_bet_size(
     oracle_prob: float,
-    kalshi_mid: float,
+    kalshi_mid: float | None,
     bankroll: float,
 ) -> float:
+    # No live price → no bet. A missing/degenerate price must never be treated as
+    # 0 (which would read as a full-probability edge and size a bet on nothing).
+    if kalshi_mid is None or not (0.0 < kalshi_mid < 1.0):
+        return 0.0
     edge = oracle_prob - kalshi_mid
     if edge < MIN_EDGE:
         return 0.0

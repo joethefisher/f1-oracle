@@ -6,14 +6,11 @@ Usage:
 """
 
 import argparse
-import time
-import requests
 from rich.console import Console
 
+from tools import kalshi
 from tools.db import cursor
 
-BASE_URL = "https://api.elections.kalshi.com/trade-api/v2"
-HEADERS = {"Accept": "application/json"}
 console = Console()
 
 
@@ -38,14 +35,7 @@ def build_market_rows(markets: list[dict], race_id: int, market_type: str) -> li
 
 
 def fetch_markets_for_event(event_ticker: str) -> list[dict]:
-    resp = requests.get(
-        f"{BASE_URL}/markets",
-        headers=HEADERS,
-        params={"event_ticker": event_ticker, "limit": 200},
-        timeout=10,
-    )
-    resp.raise_for_status()
-    return resp.json().get("markets", [])
+    return kalshi.fetch_markets_for_event(event_ticker)
 
 
 def save_markets(race_id: int, event_ticker: str, market_type: str):

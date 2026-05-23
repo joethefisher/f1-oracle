@@ -40,8 +40,11 @@ CREATE TABLE IF NOT EXISTS predictions (
     id                 SERIAL PRIMARY KEY,
     market_id          INTEGER REFERENCES markets(id),
     oracle_probability NUMERIC(6,4) NOT NULL,
-    kalshi_mid_price   NUMERIC(6,4) NOT NULL,
-    edge               NUMERIC(6,4) NOT NULL,
+    -- kalshi_mid_price / edge are NULL when the market has no live price.
+    -- We still store the Oracle's probability (the public site shows it), but
+    -- never bet without a real price. See run_model.save_predictions_and_get_ids.
+    kalshi_mid_price   NUMERIC(6,4),
+    edge               NUMERIC(6,4),
     predicted_at       TIMESTAMPTZ DEFAULT NOW(),
     model_version      TEXT NOT NULL DEFAULT 'v1'
 );
@@ -113,9 +116,18 @@ CREATE TABLE IF NOT EXISTS orderbook_snapshots (
 """
 
 
+# Idempotent migrations for already-created databases (CREATE TABLE IF NOT EXISTS
+# never alters an existing table). Each statement is safe to re-run.
+MIGRATIONS = """
+ALTER TABLE predictions ALTER COLUMN kalshi_mid_price DROP NOT NULL;
+ALTER TABLE predictions ALTER COLUMN edge DROP NOT NULL;
+"""
+
+
 def init_db():
     with cursor() as cur:
         cur.execute(SCHEMA)
+        cur.execute(MIGRATIONS)
     console.print("[green]Schema created successfully (9 tables).[/]")
 
 

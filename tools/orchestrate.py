@@ -18,7 +18,7 @@ import sys
 import time
 from datetime import datetime, timedelta, timezone
 
-import requests
+from tools import kalshi
 
 logging.basicConfig(
     level=logging.INFO,
@@ -38,44 +38,7 @@ SERIES_MARKET_TYPES: dict[str, str] = {
     "KXF1RACESPRINT":  "sprint",
 }
 
-BASE_URL = "https://api.elections.kalshi.com/trade-api/v2"
-HEADERS = {"Accept": "application/json"}
-
 ALL_MARKET_TYPES = ["race_winner", "podium", "pole"]
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Kalshi API helpers (reused from explore_markets.py)
-# ─────────────────────────────────────────────────────────────────────────────
-
-def kalshi_get(path: str, params: dict | None = None, retries: int = 4) -> dict:
-    delay = 2
-    for attempt in range(retries):
-        resp = requests.get(f"{BASE_URL}{path}", headers=HEADERS, params=params or {}, timeout=15)
-        if resp.status_code == 429:
-            log.warning("Kalshi rate limited — waiting %ds (attempt %d)", delay, attempt + 1)
-            time.sleep(delay)
-            delay *= 2
-            continue
-        resp.raise_for_status()
-        return resp.json()
-    raise RuntimeError(f"Kalshi API failed after {retries} retries: {path}")
-
-
-def kalshi_paginate(path: str, key: str, params: dict | None = None) -> list:
-    params = dict(params or {})
-    results: list = []
-    cursor = None
-    while True:
-        if cursor:
-            params["cursor"] = cursor
-        data = kalshi_get(path, params)
-        results.extend(data.get(key, []))
-        cursor = data.get("cursor")
-        if not cursor:
-            break
-        time.sleep(0.5)
-    return results
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -234,12 +197,7 @@ def find_kalshi_event_ticker(race_name: str, race_date_utc, series_ticker: str) 
         race_date_utc = race_date_utc.replace(tzinfo=timezone.utc)
 
     try:
-        events = kalshi_paginate("/events", "events", {
-            "series_ticker": series_ticker,
-            "status": "open",
-            "with_nested_markets": "false",
-            "limit": 200,
-        })
+        events = kalshi.fetch_events(series_ticker)
     except Exception as e:
         log.warning("Could not fetch events for series %s: %s", series_ticker, e)
         return None
@@ -323,45 +281,6 @@ def discover_and_save_markets(race: dict) -> int:
 # Orderbook snapshot + price refresh
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _best_price(levels: list) -> float | None:
-    """Best (highest) resting bid price from a list of [price, size] levels.
-
-    Kalshi's `orderbook_fp` returns prices as dollar strings (e.g. "0.3100").
-    Taking the max is robust to whether levels are sorted ascending or descending.
-    """
-    prices = []
-    for level in levels or []:
-        try:
-            prices.append(float(level[0]))
-        except (ValueError, TypeError, IndexError):
-            continue
-    return max(prices) if prices else None
-
-
-def _parse_orderbook(data: dict):
-    """Extract (yes_bid, yes_ask, no_bid, no_ask) from a Kalshi orderbook response.
-
-    The current API returns `orderbook_fp` with `yes_dollars`/`no_dollars` (dollar
-    strings). `yes_dollars` are resting YES bids; `no_dollars` are resting NO bids.
-    The YES ask is the complement of the best NO bid (and vice versa). An empty
-    side yields None for the prices derived from it.
-    """
-    ob = data.get("orderbook_fp") or data.get("orderbook") or {}
-    yes_bid = _best_price(ob.get("yes_dollars") or ob.get("yes"))
-    no_bid  = _best_price(ob.get("no_dollars") or ob.get("no"))
-    yes_ask = (1.0 - no_bid) if no_bid is not None else None
-    no_ask  = (1.0 - yes_bid) if yes_bid is not None else None
-    return yes_bid, yes_ask, no_bid, no_ask
-
-
-def _compute_mid(yes_bid, yes_ask) -> float | None:
-    bid = float(yes_bid) if yes_bid is not None else None
-    ask = float(yes_ask) if yes_ask is not None else None
-    if bid is not None and ask is not None:
-        return (bid + ask) / 2
-    return ask or bid
-
-
 def snapshot_and_persist_orderbook(race_id: int) -> int:
     """Fetch current orderbook for all open markets for this race and write to DB."""
     from tools.db import cursor
@@ -379,8 +298,8 @@ def snapshot_and_persist_orderbook(race_id: int) -> int:
     saved = 0
     for market_id, ticker in markets:
         try:
-            data = kalshi_get(f"/markets/{ticker}/orderbook", {"depth": 5})
-            best_yes_bid, best_yes_ask, best_no_bid, best_no_ask = _parse_orderbook(data)
+            data = kalshi.fetch_orderbook(ticker)
+            best_yes_bid, best_yes_ask, best_no_bid, best_no_ask = kalshi.parse_orderbook(data)
             volume_24h    = data.get("market", {}).get("volume_24h_fp")
 
             if DRY_RUN:
@@ -426,7 +345,7 @@ def refresh_prediction_prices(race_id: int) -> int:
     updated = 0
     with cursor() as cur:
         for market_id, best_bid, best_ask in snapshots:
-            mid = _compute_mid(best_bid, best_ask)
+            mid = kalshi.compute_mid(best_bid, best_ask)
             if mid is None:
                 continue
             if DRY_RUN:

@@ -21,8 +21,8 @@ import requests
 from rich.console import Console
 from rich.table import Table
 
-BASE_URL = "https://api.elections.kalshi.com/trade-api/v2"
-HEADERS = {"Accept": "application/json"}
+from tools import kalshi
+
 TMP_DIR = Path(__file__).parent.parent / ".tmp"
 
 F1_SERIES_V1 = [
@@ -37,56 +37,17 @@ F1_SERIES_V1 = [
 console = Console()
 
 
-def get(path, params=None, retries=4):
-    delay = 2
-    for attempt in range(retries):
-        resp = requests.get(f"{BASE_URL}{path}", headers=HEADERS, params=params)
-        if resp.status_code == 429:
-            console.print(f"[yellow]Rate limited — waiting {delay}s...[/]")
-            time.sleep(delay)
-            delay *= 2
-            continue
-        resp.raise_for_status()
-        return resp.json()
-    raise RuntimeError(f"Failed after {retries} retries: {path}")
-
-
 def get_open_markets(series_tickers):
     markets = []
     for st in series_tickers:
-        data = get("/markets", {"series_ticker": st, "status": "open", "limit": 1000})
+        data = kalshi.get("/markets", {"series_ticker": st, "status": "open", "limit": 1000})
         markets.extend(data.get("markets", []))
         time.sleep(0.3)
     return markets
 
 
 def get_markets_for_event(event_ticker):
-    data = get("/markets", {"event_ticker": event_ticker, "status": "open", "limit": 1000})
-    return data.get("markets", [])
-
-
-def fetch_orderbook(ticker):
-    data = get(f"/markets/{ticker}/orderbook", {"depth": 5})
-    return data.get("orderbook_fp", {})
-
-
-def best_bid_ask(orderbook):
-    """Extract best bid/ask from orderbook. yes_dollars sorted desc = bids."""
-    yes_levels = orderbook.get("yes_dollars", [])
-    no_levels = orderbook.get("no_dollars", [])
-
-    best_yes_bid = yes_levels[0][0] if yes_levels else None
-    best_no_bid = no_levels[0][0] if no_levels else None
-
-    # yes_ask = 1 - no_bid (in cents: yes_ask = 100 - no_bid_cents)
-    yes_ask = None
-    if best_no_bid is not None:
-        try:
-            yes_ask = f"{1.0 - float(best_no_bid):.4f}"
-        except (ValueError, TypeError):
-            pass
-
-    return best_yes_bid, yes_ask
+    return kalshi.fetch_markets_for_event(event_ticker)
 
 
 def snapshot_markets(markets):
@@ -105,19 +66,15 @@ def snapshot_markets(markets):
     for m in markets:
         ticker = m["ticker"]
         try:
-            ob = fetch_orderbook(ticker)
-            bid, ask = best_bid_ask(ob)
+            data = kalshi.fetch_orderbook(ticker)
+            bid, ask, no_bid, no_ask = kalshi.parse_orderbook(data)
+            ob = data.get("orderbook_fp", {})
             time.sleep(0.2)
         except Exception as e:
             console.print(f"[red]Error fetching {ticker}: {e}[/]")
-            bid, ask, ob = None, None, {}
+            bid, ask, no_bid, no_ask, ob = None, None, None, None, {}
 
-        spread = None
-        if bid and ask:
-            try:
-                spread = f"{float(ask) - float(bid):.4f}"
-            except ValueError:
-                pass
+        spread = (ask - bid) if (bid is not None and ask is not None) else None
 
         results.append({
             "ticker": ticker,
@@ -125,6 +82,8 @@ def snapshot_markets(markets):
             "event_ticker": m.get("event_ticker", ""),
             "yes_bid": bid,
             "yes_ask": ask,
+            "no_bid": no_bid,
+            "no_ask": no_ask,
             "spread": spread,
             "volume_24h": m.get("volume_24h_fp"),
             "open_interest": m.get("open_interest_fp"),
@@ -135,9 +94,9 @@ def snapshot_markets(markets):
         table.add_row(
             ticker[:40],
             (m.get("yes_sub_title") or m.get("title", ""))[:45],
-            str(bid) if bid else "—",
-            str(ask) if ask else "—",
-            str(spread) if spread else "—",
+            f"{bid:.4f}" if bid is not None else "—",
+            f"{ask:.4f}" if ask is not None else "—",
+            f"{spread:.4f}" if spread is not None else "—",
             str(m.get("volume_24h_fp", "—")),
         )
 
@@ -158,7 +117,7 @@ def main():
 
     try:
         if args.ticker:
-            data = get(f"/markets/{args.ticker}")
+            data = kalshi.get(f"/markets/{args.ticker}")
             markets = [data.get("market", {})]
         elif args.event:
             console.print(f"Fetching markets for event [cyan]{args.event}[/]...")

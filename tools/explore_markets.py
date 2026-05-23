@@ -14,8 +14,8 @@ import requests
 from rich.console import Console
 from rich.table import Table
 
-BASE_URL = "https://api.elections.kalshi.com/trade-api/v2"
-HEADERS = {"Accept": "application/json"}
+from tools import kalshi
+from tools.kalshi import get, paginate
 
 # Series in scope for v1 (race winner, constructors, podium, pole, sprint)
 F1_SERIES_V1 = [
@@ -28,37 +28,6 @@ F1_SERIES_V1 = [
 ]
 
 console = Console()
-
-
-def get(path, params=None, retries=4):
-    """GET with exponential backoff on 429."""
-    delay = 2
-    for attempt in range(retries):
-        resp = requests.get(f"{BASE_URL}{path}", headers=HEADERS, params=params)
-        if resp.status_code == 429:
-            console.print(f"[yellow]Rate limited — waiting {delay}s...[/]")
-            time.sleep(delay)
-            delay *= 2
-            continue
-        resp.raise_for_status()
-        return resp.json()
-    raise RuntimeError(f"Failed after {retries} retries: {path}")
-
-
-def paginate(path, key, params=None):
-    params = params or {}
-    results = []
-    cursor = None
-    while True:
-        if cursor:
-            params["cursor"] = cursor
-        data = get(path, params)
-        results.extend(data.get(key, []))
-        cursor = data.get("cursor")
-        if not cursor:
-            break
-        time.sleep(0.5)  # 500ms between pages
-    return results
 
 
 def list_f1_series():

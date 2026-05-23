@@ -40,6 +40,17 @@ def test_half_kelly_scales_with_bankroll():
     assert abs(result_2k - result_1k * 2) < 0.1
 
 
+def test_half_kelly_no_price_returns_zero():
+    # Missing price must never be treated as a 0 mid (which would read as a
+    # full-probability edge and place a bet on a phantom price).
+    assert half_kelly_bet_size(oracle_prob=0.52, kalshi_mid=None, bankroll=1000.0) == 0.0
+
+
+def test_half_kelly_degenerate_price_returns_zero():
+    assert half_kelly_bet_size(oracle_prob=0.52, kalshi_mid=0.0, bankroll=1000.0) == 0.0
+    assert half_kelly_bet_size(oracle_prob=0.52, kalshi_mid=1.0, bankroll=1000.0) == 0.0
+
+
 def test_kalshi_mid_price_both_sides():
     assert kalshi_mid_price(bid=0.25, ask=0.30) == 0.275
 

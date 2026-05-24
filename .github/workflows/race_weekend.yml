@@ -66,6 +66,13 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
+      # Apply idempotent schema/migrations so the DB is always current — no
+      # hand-run migration step is ever needed.
+      - name: Apply DB migrations
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: python -m tools.db_init
+
       - name: Get cache key month
         id: month
         run: echo "val=$(date +'%Y-%m')" >> $GITHUB_OUTPUT
@@ -86,12 +93,26 @@ jobs:
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
+          TELEGRAM_API_TOKEN: ${{ secrets.TELEGRAM_API_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
           RACE_ID_ARG=""
           if [ -n "${{ github.event.inputs.race_id }}" ]; then
             RACE_ID_ARG="--race-id ${{ github.event.inputs.race_id }}"
           fi
           python -m tools.orchestrate $RACE_ID_ARG
+
+      # Belt-and-suspenders: ping Telegram if any step above failed (the
+      # orchestrator also self-reports crashes; this catches failures elsewhere
+      # in the job, e.g. dependency install or db_init).
+      - name: Alert on failure
+        if: failure()
+        env:
+          TELEGRAM_API_TOKEN: ${{ secrets.TELEGRAM_API_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          pip install requests python-dotenv >/dev/null 2>&1 || true
+          python -m tools.notify "🚨 F1 Oracle race_weekend workflow failed — see GitHub Actions run ${{ github.run_id }}" || true
 
       # Commit retrained models back to the repo. Orchestrator step 9 retrains
       # only once per race (guarded on model_metrics), and training is

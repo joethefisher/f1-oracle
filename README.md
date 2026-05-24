@@ -148,7 +148,18 @@ npm run dev
 
 ### Automation
 
-Add `DATABASE_URL` as a repository secret. The workflow in `.github/workflows/race_weekend.yml` runs every 30 minutes Thursday through Sunday, and once daily the rest of the week. A gate job checks for an active race week before running the full pipeline.
+Add `DATABASE_URL` as a repository secret. The workflow in `.github/workflows/race_weekend.yml` runs every 30 minutes Thursday through Sunday, and once daily the rest of the week. A gate job checks for an active race week before running the full pipeline; it applies idempotent DB migrations, runs the orchestrator, and commits any retrained models back.
+
+It runs **hands-off**: race status self-heals from facts, missing markets are discovered incrementally, and when the season runs out the next one is set up automatically.
+
+### Notifications & health watchdog
+
+With a Telegram bot configured (optional), the bot reports for itself:
+- 🏁 **bets placed**, 🏆 **race & bet results**, and 💰 **portfolio standing vs the Kalshi-crowd baseline** at each weekend milestone;
+- 🚨 **alerts** on crashes and — via the independent watchdog in `.github/workflows/health_check.yml` — on *silent* failures (e.g. a race weekend that produced no predictions). Alerts de-dupe, pinging once per problem.
+
+Add these as repository secrets to enable it (leave unset to disable silently):
+`TELEGRAM_API_TOKEN`, `TELEGRAM_CHAT_ID`. See `.env.example` for how to obtain them.
 
 ---
 
@@ -157,6 +168,8 @@ Add `DATABASE_URL` as a repository secret. The workflow in `.github/workflows/ra
 ```bash
 # .env
 DATABASE_URL=postgresql://...
+TELEGRAM_API_TOKEN=        # optional — notifications
+TELEGRAM_CHAT_ID=          # optional — notifications
 
 # web/.env.local
 NEXT_PUBLIC_SUPABASE_URL=https://<your-project>.supabase.co

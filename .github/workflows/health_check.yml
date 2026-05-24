@@ -1,0 +1,42 @@
+name: F1 Oracle — Health Watchdog
+
+on:
+  schedule:
+    # Same cadence as the orchestrator: every 30 min Thu–Sun, daily Mon–Wed.
+    - cron: "*/30 * * * 0,4,5,6"
+    - cron: "0 9 * * 1,2,3"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Evaluate + log only, no notify/writes"
+        required: false
+        default: "false"
+
+jobs:
+  health:
+    name: Phase-aware health check
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # Deliberately minimal — the watchdog imports only tools.db + tools.notify,
+      # so it stays independent of (and lighter than) the orchestrator.
+      - name: Install minimal deps
+        run: pip install "psycopg[binary]" requests python-dotenv
+
+      - name: Run health check
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          TELEGRAM_API_TOKEN: ${{ secrets.TELEGRAM_API_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          DRY=""
+          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then DRY="--dry-run"; fi
+          python -m tools.health_check $DRY

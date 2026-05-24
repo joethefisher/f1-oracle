@@ -16,6 +16,7 @@ import logging
 import os
 import sys
 import time
+import traceback
 from datetime import datetime, timedelta, timezone
 
 from tools import kalshi
@@ -432,6 +433,95 @@ def get_race_weather(circuit: str, race_date_utc) -> bool:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Telegram event notifications (success signals; tools stay notification-free)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _notify_bets_placed(race_id: int, race_name: str, market_types: list[str]):
+    from tools import notify, summaries
+    from tools.db import cursor
+    from tools.train_model import MODEL_VERSION
+    with cursor() as cur:
+        cur.execute("""
+            SELECT m.market_type, m.driver_abbreviation, p.oracle_probability,
+                   p.kalshi_mid_price, p.edge, b.bet_size_dollars, b.bankroll_at_time
+            FROM virtual_bets b
+            JOIN predictions p ON b.prediction_id = p.id
+            JOIN markets m ON p.market_id = m.id
+            WHERE m.race_id = %s AND p.model_version = %s
+              AND m.market_type = ANY(%s) AND b.bet_size_dollars > 0
+            ORDER BY b.bet_size_dollars DESC
+        """, (race_id, MODEL_VERSION, list(market_types)))
+        rows = cur.fetchall()
+    bankroll = float(rows[0][6]) if rows else 0.0
+    bets = [{"market_type": r[0], "driver": r[1], "oracle_prob": float(r[2]),
+             "kalshi_mid": float(r[3]), "edge": float(r[4]), "bet_size": float(r[5])}
+            for r in rows]
+    notify.send(summaries.format_bets_placed(race_name, bets, bankroll))
+
+
+def _notify_results(race_id: int, race_name: str):
+    from tools import notify, summaries
+    from tools.db import cursor
+    from tools.train_model import MODEL_VERSION
+    from tools.settle_outcomes import compute_pnl
+    with cursor() as cur:
+        cur.execute("SELECT abbreviation FROM race_results WHERE race_id = %s AND position = 1", (race_id,))
+        w = cur.fetchone()
+        winner = w[0] if w else None
+        cur.execute("""
+            SELECT m.market_type, m.driver_abbreviation, b.bet_size_dollars,
+                   p.kalshi_mid_price, o.winning_side
+            FROM virtual_bets b
+            JOIN predictions p ON b.prediction_id = p.id
+            JOIN markets m ON p.market_id = m.id
+            LEFT JOIN outcomes o ON o.market_id = m.id
+            WHERE m.race_id = %s AND p.model_version = %s AND b.bet_size_dollars > 0
+        """, (race_id, MODEL_VERSION))
+        rows = cur.fetchall()
+    bet_results = []
+    for mt, drv, size, mid, side in rows:
+        won = side == "yes"
+        pnl = compute_pnl(float(size), float(mid) if mid else 0.0, won)
+        bet_results.append({"market_type": mt, "driver": drv, "won": won,
+                            "pnl": pnl, "bet_size": float(size)})
+    notify.send(summaries.format_results(race_name, winner, bet_results))
+
+
+def _notify_portfolio(race_id: int, race_name: str):
+    from tools import notify, summaries
+    from tools.db import cursor
+    with cursor() as cur:
+        cur.execute("""
+            SELECT bankroll_after, return_pct, kalshi_baseline_value
+            FROM portfolio_snapshots WHERE race_id = %s
+            ORDER BY snapshot_at DESC LIMIT 1
+        """, (race_id,))
+        row = cur.fetchone()
+    if not row:
+        return
+    snap = {"bankroll_after": row[0], "return_pct": row[1], "kalshi_baseline_value": row[2]}
+    notify.send(summaries.format_portfolio(snap))
+
+
+def _ensure_season_setup():
+    """When the DB has no upcoming races at all, auto-set up the current/next season."""
+    if _count("SELECT COUNT(*) FROM races WHERE race_date_utc >= NOW()", ()) > 0:
+        return
+    if DRY_RUN:
+        log.info("[DRY RUN] Would set up upcoming season(s) — no future races in DB")
+        return
+    log.info("No upcoming races in DB — auto-setting up the season")
+    year = now_utc().year
+    try:
+        from tools.setup_season import setup_season
+        for season in (year, year + 1):
+            setup_season(season)
+        log.info("Season setup complete for %d, %d", year, year + 1)
+    except Exception as e:
+        log.error("Season auto-setup failed: %s", e)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Main orchestration state machine
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -446,6 +536,7 @@ def orchestrate(race_id: int | None = None):
     race = find_target_race(race_id)
     if not race:
         log.info("No active race weekend found within 7-day window — nothing to do")
+        _ensure_season_setup()
         return
 
     log.info("Target race: %s (id=%d, %s R%d, status=%s)",
@@ -514,6 +605,7 @@ def orchestrate(race_id: int | None = None):
                 from tools.run_model import run_pole_prequali
                 run_pole_prequali(race["season"], race["round"], is_wet=is_wet)
                 log.info("Pole (pre-qualifying) complete")
+                _notify_bets_placed(rid, race["name"], ["pole"])
             except Exception as e:
                 log.error("Pole pre-quali run failed: %s", e)
     elif qualifying_results_exist(rid) and not predictions_exist(rid, "pole"):
@@ -531,6 +623,7 @@ def orchestrate(race_id: int | None = None):
                 from tools.run_model import run_race
                 run_race(race["season"], race["round"], POST_QUALI_MARKET_TYPES, is_wet=is_wet)
                 log.info("Model run complete")
+                _notify_bets_placed(rid, race["name"], POST_QUALI_MARKET_TYPES)
             except Exception as e:
                 log.error("Model run failed: %s", e)
     elif predictions_exist(rid, "race_winner"):
@@ -579,6 +672,7 @@ def orchestrate(race_id: int | None = None):
                 from tools.settle_outcomes import settle_race
                 settle_race(rid)
                 log.info("Outcomes settled")
+                _notify_results(rid, race["name"])
             except Exception as e:
                 log.error("Settlement failed: %s", e)
     elif outcomes_settled(rid):
@@ -594,6 +688,7 @@ def orchestrate(race_id: int | None = None):
                 from tools.update_portfolio import compute_and_save
                 compute_and_save(rid)
                 log.info("Portfolio updated")
+                _notify_portfolio(rid, race["name"])
             except Exception as e:
                 log.error("Portfolio update failed: %s", e)
     elif portfolio_snapshot_exists(rid):
@@ -635,7 +730,17 @@ def main():
     if DRY_RUN:
         log.info("=== DRY RUN MODE — no DB writes ===")
 
-    orchestrate(args.race_id)
+    try:
+        orchestrate(args.race_id)
+    except Exception:
+        # Alert on a hard crash, then re-raise so the Actions run also fails
+        # (GitHub's owner email is the second channel).
+        tb = traceback.format_exc()
+        log.error("Orchestrator crashed:\n%s", tb)
+        if not DRY_RUN:
+            from tools import notify
+            notify.send("🚨 F1 Oracle orchestrator crashed:\n" + tb[-1500:])
+        raise
 
 
 if __name__ == "__main__":

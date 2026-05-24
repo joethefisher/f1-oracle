@@ -127,6 +127,18 @@ CREATE TABLE IF NOT EXISTS model_metrics (
     computed_at    TIMESTAMPTZ DEFAULT NOW(),
     UNIQUE (race_id, model_version, market_type)
 );
+
+-- Open/resolved health-check alerts, so the watchdog pings once per problem
+-- (not every run). check_key is a stable id like "260:no_predictions".
+CREATE TABLE IF NOT EXISTS health_alerts (
+    id          SERIAL PRIMARY KEY,
+    check_key   TEXT NOT NULL UNIQUE,
+    race_id     INTEGER,
+    severity    TEXT,
+    message     TEXT,
+    opened_at   TIMESTAMPTZ DEFAULT NOW(),
+    resolved_at TIMESTAMPTZ
+);
 """
 
 
@@ -142,7 +154,7 @@ def init_db():
     with cursor() as cur:
         cur.execute(SCHEMA)
         cur.execute(MIGRATIONS)
-    console.print("[green]Schema created successfully (10 tables).[/]")
+    console.print("[green]Schema created successfully (11 tables).[/]")
 
 
 if __name__ == "__main__":

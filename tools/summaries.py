@@ -53,6 +53,59 @@ def format_results(race_name: str, winner: str | None, bet_results: list[dict]) 
     return "\n".join(lines)
 
 
+def format_weekend_review(weekend: dict) -> str:
+    """🔍 Favorites-faded post-mortem for the weekend.
+
+    weekend: the dict returned by tools.review_weekend.load_weekend, i.e.
+    {race_name, bet_time, by_market: {market_type: [row, ...]}}.
+
+    Headlines the painful case (a favorite the model rated below market that
+    then won) — that's the answer to "why didn't the bot bet the favorites."
+    """
+    race_name = weekend["race_name"]
+    by_market = weekend.get("by_market", {})
+
+    # Faded favorites that hit are the headline (e.g. "ANT won despite the
+    # model rating ANT below the market").
+    faded_hits, faded_misses = [], []
+    for mtype, rows in by_market.items():
+        for r in rows:
+            if not r.get("is_favorite"):
+                continue
+            o, m = r.get("oracle"), r.get("market_mid")
+            if o is None or m is None or o >= m:
+                continue  # not faded
+            (faded_hits if r["won"] else faded_misses).append((mtype, r))
+
+    bets = [r for rows in by_market.values() for r in rows if r.get("bet_size", 0) > 0]
+    wins = sum(1 for r in bets if r["won"])
+    net = sum(r.get("pnl", 0.0) for r in bets)
+    staked = sum(r["bet_size"] for r in bets)
+
+    lines = [f"🔍 {race_name} — weekend review"]
+    if bets:
+        lines.append(f"Record: {wins}/{len(bets)} won · staked ${staked:.2f} · "
+                     f"net {net:+.2f}")
+    else:
+        lines.append("No bets placed this weekend.")
+
+    if faded_hits:
+        lines.append("")
+        lines.append(f"⚠️  {len(faded_hits)} faded favorite(s) hit — "
+                     f"model rated them below the crowd and the crowd was right:")
+        for mtype, r in sorted(faded_hits, key=lambda x: -(x[1]["market_mid"] or 0)):
+            lines.append(
+                f"• {mtype} {r['driver']}: oracle {r['oracle']*100:.1f}% vs "
+                f"market {r['market_mid']*100:.1f}% (edge {(r['oracle']-r['market_mid'])*100:+.1f}%) "
+                f"→ P{r['position']}"
+            )
+    elif faded_misses:
+        lines.append("")
+        lines.append("No faded favorites hit — value strategy held up.")
+
+    return "\n".join(lines)
+
+
 def format_portfolio(snapshot: dict, starting: float = STARTING_BANKROLL) -> str:
     """💰 Portfolio standing vs the Kalshi-crowd baseline.
 

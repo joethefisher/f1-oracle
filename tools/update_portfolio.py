@@ -78,8 +78,14 @@ def compute_and_save(race_id: int):
     from tools.db import cursor
 
     with cursor() as cur:
+        # COALESCE: prefer the price snapshotted into the bet row at bet time
+        # (the only trustworthy value for P&L); fall back to predictions for
+        # historic bets predating the bet-time snapshot column. predictions's
+        # value gets overwritten post-race, so we never want it for fresh bets.
         cur.execute("""
-            SELECT vb.bet_size_dollars, p.kalshi_mid_price, o.winning_side
+            SELECT vb.bet_size_dollars,
+                   COALESCE(vb.kalshi_mid_at_bet, p.kalshi_mid_price) AS price,
+                   o.winning_side
             FROM virtual_bets vb
             JOIN predictions p ON vb.prediction_id = p.id AND p.model_version = %s
             JOIN markets m ON p.market_id = m.id

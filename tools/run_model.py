@@ -174,6 +174,11 @@ def save_predictions_and_get_ids(
             has_price = mid is not None and 0 < mid < 1
             kalshi_mid = mid if has_price else None
             edge = round(pred["probability"] - mid, 6) if has_price else None
+            # Freeze the prediction row once the market has an outcome — a
+            # post-race run_model otherwise overwrites kalshi_mid_price/edge with
+            # the resolved 99c/1c values, destroying the bot's history. The
+            # WHERE skips the UPDATE for settled markets; when that happens
+            # RETURNING yields no row, so we look up the existing id explicitly.
             cur.execute("""
                 INSERT INTO predictions
                     (market_id, oracle_probability, kalshi_mid_price, edge, model_version)
@@ -183,9 +188,19 @@ def save_predictions_and_get_ids(
                         kalshi_mid_price   = EXCLUDED.kalshi_mid_price,
                         edge               = EXCLUDED.edge,
                         predicted_at       = NOW()
+                    WHERE NOT EXISTS (
+                        SELECT 1 FROM outcomes o WHERE o.market_id = predictions.market_id
+                    )
                 RETURNING id
             """, (market_id, pred["probability"], kalshi_mid, edge, MODEL_VERSION))
-            pred_id = cur.fetchone()[0]
+            row = cur.fetchone()
+            if row is None:
+                cur.execute(
+                    "SELECT id FROM predictions WHERE market_id = %s AND model_version = %s",
+                    (market_id, MODEL_VERSION),
+                )
+                row = cur.fetchone()
+            pred_id = row[0]
             pred_id_map[market_id] = pred_id
     return pred_id_map
 
@@ -397,6 +412,11 @@ def _place_batch_bets(race_id: int, contexts: list[dict], strengths: dict[str, f
                 "bet_size": s["bet_size"],
                 "kelly_fraction": s["fraction"],
                 "bankroll_at_time": bankroll,
+                # Snapshot the price paid and the model's view at bet time so
+                # later re-runs (which overwrite predictions.kalshi_mid_price)
+                # can't corrupt P&L or post-mortems.
+                "kalshi_mid": s["price"],
+                "oracle_probability": s["oracle_prob"],
             })
             pred_id_map[s["market_id"]] = s["prediction_id"]
 

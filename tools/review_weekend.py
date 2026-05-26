@@ -153,7 +153,8 @@ def load_weekend(race_id: int, model_version: str = MODEL_VERSION) -> dict | Non
 
         cur.execute("""
             SELECT m.id, m.market_type, m.driver_abbreviation,
-                   p.oracle_probability, vb.bet_size_dollars
+                   p.oracle_probability, vb.bet_size_dollars,
+                   vb.kalshi_mid_at_bet, vb.oracle_prob_at_bet
             FROM markets m
             JOIN predictions p ON p.market_id = m.id AND p.model_version = %s
             LEFT JOIN virtual_bets vb ON vb.prediction_id = p.id
@@ -162,9 +163,19 @@ def load_weekend(race_id: int, model_version: str = MODEL_VERSION) -> dict | Non
         market_rows = cur.fetchall()
 
         by_market: dict[str, list[dict]] = {}
-        for market_id, mtype, drv, oracle, bet_size in market_rows:
-            market_mid = _market_mid_at(cur, market_id, when) if when else None
-            oracle = float(oracle) if oracle is not None else None
+        for market_id, mtype, drv, oracle, bet_size, bet_mid, bet_oracle in market_rows:
+            # Prefer the bet-time snapshot when a bet was placed (it's the only
+            # value that's guaranteed not to have been overwritten by a later
+            # run); fall back to reconstructing from the orderbook history for
+            # markets the bot didn't bet (the faded-favorites we want to surface).
+            if bet_mid is not None:
+                market_mid = float(bet_mid)
+            else:
+                market_mid = _market_mid_at(cur, market_id, when) if when else None
+            if bet_oracle is not None:
+                oracle = float(bet_oracle)
+            elif oracle is not None:
+                oracle = float(oracle)
             bet_size = float(bet_size) if bet_size is not None else 0.0
             won = determine_winner(mtype, drv or "", race_res,
                                    quali_res if quali_res else None)

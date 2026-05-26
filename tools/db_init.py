@@ -50,12 +50,17 @@ CREATE TABLE IF NOT EXISTS predictions (
 );
 
 CREATE TABLE IF NOT EXISTS virtual_bets (
-    id               SERIAL PRIMARY KEY,
-    prediction_id    INTEGER REFERENCES predictions(id),
-    bet_size_dollars NUMERIC(10,2) NOT NULL,
-    kelly_fraction   NUMERIC(8,6) NOT NULL,
-    bankroll_at_time NUMERIC(10,2) NOT NULL,
-    placed_at        TIMESTAMPTZ DEFAULT NOW()
+    id                 SERIAL PRIMARY KEY,
+    prediction_id      INTEGER REFERENCES predictions(id),
+    bet_size_dollars   NUMERIC(10,2) NOT NULL,
+    kelly_fraction     NUMERIC(8,6) NOT NULL,
+    bankroll_at_time   NUMERIC(10,2) NOT NULL,
+    -- The price the bot actually paid and the model's view at bet time. These
+    -- are the source of truth for P&L and post-mortems; predictions.kalshi_mid_price
+    -- is mutable (run_model upserts on every run) and not safe to rely on.
+    kalshi_mid_at_bet  NUMERIC(6,4),
+    oracle_prob_at_bet NUMERIC(6,4),
+    placed_at          TIMESTAMPTZ DEFAULT NOW()
 );
 
 CREATE TABLE IF NOT EXISTS outcomes (
@@ -147,6 +152,34 @@ CREATE TABLE IF NOT EXISTS health_alerts (
 MIGRATIONS = """
 ALTER TABLE predictions ALTER COLUMN kalshi_mid_price DROP NOT NULL;
 ALTER TABLE predictions ALTER COLUMN edge DROP NOT NULL;
+ALTER TABLE virtual_bets ADD COLUMN IF NOT EXISTS kalshi_mid_at_bet  NUMERIC(6,4);
+ALTER TABLE virtual_bets ADD COLUMN IF NOT EXISTS oracle_prob_at_bet NUMERIC(6,4);
+"""
+
+# Backfill bet-time price for historic rows from the nearest orderbook snapshot
+# at/before placed_at. Idempotent: only fills NULLs, so re-runs are no-ops once
+# populated. Predictions.kalshi_mid_price isn't trustworthy here — run_model
+# overwrites it on every run, including post-race when the book has resolved.
+BACKFILL_BET_PRICES = """
+UPDATE virtual_bets vb
+SET kalshi_mid_at_bet = sub.mid
+FROM (
+    SELECT DISTINCT ON (vb2.id) vb2.id,
+        CASE
+            WHEN os.best_yes_bid IS NOT NULL AND os.best_yes_ask IS NOT NULL
+                THEN (os.best_yes_bid + os.best_yes_ask) / 2
+            WHEN os.best_yes_ask IS NOT NULL THEN os.best_yes_ask
+            WHEN os.best_yes_bid IS NOT NULL THEN os.best_yes_bid
+            WHEN os.best_no_bid  IS NOT NULL THEN 1.0 - os.best_no_bid
+        END AS mid
+    FROM virtual_bets vb2
+    JOIN predictions p2 ON vb2.prediction_id = p2.id
+    JOIN orderbook_snapshots os ON os.market_id = p2.market_id
+        AND os.snapshot_at <= vb2.placed_at
+    WHERE vb2.kalshi_mid_at_bet IS NULL
+    ORDER BY vb2.id, os.snapshot_at DESC
+) sub
+WHERE vb.id = sub.id AND vb.kalshi_mid_at_bet IS NULL;
 """
 
 
@@ -154,6 +187,7 @@ def init_db():
     with cursor() as cur:
         cur.execute(SCHEMA)
         cur.execute(MIGRATIONS)
+        cur.execute(BACKFILL_BET_PRICES)
     console.print("[green]Schema created successfully (11 tables).[/]")
 
 

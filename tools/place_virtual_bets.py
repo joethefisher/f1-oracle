@@ -39,7 +39,12 @@ def compute_bets(predictions: list[dict], bankroll: float) -> list[dict]:
 
 
 def save_bets(bets: list[dict], prediction_id_map: dict):
-    """Write bet records to virtual_bets table. prediction_id_map: {market_id: prediction_id}."""
+    """Write bet records to virtual_bets table. prediction_id_map: {market_id: prediction_id}.
+
+    Snapshots the Kalshi mid and oracle prob into the bet row so P&L and
+    post-mortems don't depend on predictions.kalshi_mid_price (which run_model
+    overwrites on every run, including post-race when the book has resolved).
+    """
     from tools.db import cursor
     with cursor() as cur:
         for bet in bets:
@@ -48,15 +53,21 @@ def save_bets(bets: list[dict], prediction_id_map: dict):
             pred_id = prediction_id_map.get(bet["market_id"])
             if pred_id is None:
                 continue
+            kalshi_mid = bet.get("kalshi_mid")
+            oracle_prob = bet.get("oracle_probability")
             cur.execute("""
                 INSERT INTO virtual_bets
-                    (prediction_id, bet_size_dollars, kelly_fraction, bankroll_at_time)
-                VALUES (%s, %s, %s, %s)
+                    (prediction_id, bet_size_dollars, kelly_fraction, bankroll_at_time,
+                     kalshi_mid_at_bet, oracle_prob_at_bet)
+                VALUES (%s, %s, %s, %s, %s, %s)
                 ON CONFLICT (prediction_id) DO UPDATE
-                    SET bet_size_dollars  = EXCLUDED.bet_size_dollars,
-                        kelly_fraction    = EXCLUDED.kelly_fraction,
-                        bankroll_at_time  = EXCLUDED.bankroll_at_time
-            """, (pred_id, bet["bet_size"], bet["kelly_fraction"], bet["bankroll_at_time"]))
+                    SET bet_size_dollars   = EXCLUDED.bet_size_dollars,
+                        kelly_fraction     = EXCLUDED.kelly_fraction,
+                        bankroll_at_time   = EXCLUDED.bankroll_at_time,
+                        kalshi_mid_at_bet  = EXCLUDED.kalshi_mid_at_bet,
+                        oracle_prob_at_bet = EXCLUDED.oracle_prob_at_bet
+            """, (pred_id, bet["bet_size"], bet["kelly_fraction"], bet["bankroll_at_time"],
+                  kalshi_mid, oracle_prob))
 
 
 def main():

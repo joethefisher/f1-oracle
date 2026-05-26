@@ -155,7 +155,7 @@ It runs **hands-off**: race status self-heals from facts, missing markets are di
 ### Notifications & health watchdog
 
 With a Telegram bot configured (optional), the bot reports for itself:
-- 🏁 **bets placed**, 🏆 **race & bet results**, and 💰 **portfolio standing vs the Kalshi-crowd baseline** at each weekend milestone;
+- 🏁 **bets placed**, 🏆 **race & bet results**, 💰 **portfolio standing vs the Kalshi-crowd baseline**, and 🔍 **weekend review** (favorites the model faded and whether they hit) at each weekend milestone;
 - 🚨 **alerts** on crashes and — via the independent watchdog in `.github/workflows/health_check.yml` — on *silent* failures (e.g. a race weekend that produced no predictions). Alerts de-dupe, pinging once per problem.
 
 Add these as repository secrets to enable it (leave unset to disable silently):

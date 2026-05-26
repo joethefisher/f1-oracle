@@ -441,9 +441,14 @@ def _notify_bets_placed(race_id: int, race_name: str, market_types: list[str]):
     from tools.db import cursor
     from tools.train_model import MODEL_VERSION
     with cursor() as cur:
+        # Prefer the bet-time snapshot; predictions columns may have been
+        # overwritten by a later run, so they're unreliable for "what the bot
+        # actually bet against."
         cur.execute("""
-            SELECT m.market_type, m.driver_abbreviation, p.oracle_probability,
-                   p.kalshi_mid_price, p.edge, b.bet_size_dollars, b.bankroll_at_time
+            SELECT m.market_type, m.driver_abbreviation,
+                   COALESCE(b.oracle_prob_at_bet, p.oracle_probability) AS oracle,
+                   COALESCE(b.kalshi_mid_at_bet, p.kalshi_mid_price)    AS price,
+                   b.bet_size_dollars, b.bankroll_at_time
             FROM virtual_bets b
             JOIN predictions p ON b.prediction_id = p.id
             JOIN markets m ON p.market_id = m.id
@@ -452,9 +457,10 @@ def _notify_bets_placed(race_id: int, race_name: str, market_types: list[str]):
             ORDER BY b.bet_size_dollars DESC
         """, (race_id, MODEL_VERSION, list(market_types)))
         rows = cur.fetchall()
-    bankroll = float(rows[0][6]) if rows else 0.0
+    bankroll = float(rows[0][5]) if rows else 0.0
     bets = [{"market_type": r[0], "driver": r[1], "oracle_prob": float(r[2]),
-             "kalshi_mid": float(r[3]), "edge": float(r[4]), "bet_size": float(r[5])}
+             "kalshi_mid": float(r[3]), "edge": float(r[2]) - float(r[3]),
+             "bet_size": float(r[4])}
             for r in rows]
     notify.send(summaries.format_bets_placed(race_name, bets, bankroll))
 
@@ -470,7 +476,8 @@ def _notify_results(race_id: int, race_name: str):
         winner = w[0] if w else None
         cur.execute("""
             SELECT m.market_type, m.driver_abbreviation, b.bet_size_dollars,
-                   p.kalshi_mid_price, o.winning_side
+                   COALESCE(b.kalshi_mid_at_bet, p.kalshi_mid_price) AS price,
+                   o.winning_side
             FROM virtual_bets b
             JOIN predictions p ON b.prediction_id = p.id
             JOIN markets m ON p.market_id = m.id
@@ -485,6 +492,16 @@ def _notify_results(race_id: int, race_name: str):
         bet_results.append({"market_type": mt, "driver": drv, "won": won,
                             "pnl": pnl, "bet_size": float(size)})
     notify.send(summaries.format_results(race_name, winner, bet_results))
+
+
+def _notify_review(race_id: int, race_name: str):
+    """🔍 Post-settlement favorites-faded review (why the bot bet/skipped what it did)."""
+    from tools import notify, summaries
+    from tools.review_weekend import load_weekend
+    weekend = load_weekend(race_id)
+    if weekend is None:
+        return
+    notify.send(summaries.format_weekend_review(weekend))
 
 
 def _notify_portfolio(race_id: int, race_name: str):
@@ -673,6 +690,7 @@ def orchestrate(race_id: int | None = None):
                 settle_race(rid)
                 log.info("Outcomes settled")
                 _notify_results(rid, race["name"])
+                _notify_review(rid, race["name"])
             except Exception as e:
                 log.error("Settlement failed: %s", e)
     elif outcomes_settled(rid):

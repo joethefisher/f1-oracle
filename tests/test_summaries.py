@@ -1,5 +1,7 @@
 """Tests for the notification formatters (tools/summaries.py)."""
-from tools.summaries import format_bets_placed, format_results, format_portfolio
+from tools.summaries import (
+    format_bets_placed, format_results, format_portfolio, format_weekend_review,
+)
 
 
 def test_bets_placed_lists_each_bet_and_total():
@@ -58,3 +60,52 @@ def test_portfolio_without_baseline():
     msg = format_portfolio(snap)
     assert "Bankroll" in msg
     assert "baseline" not in msg.lower()
+
+
+# ── format_weekend_review ────────────────────────────────────────────────────
+
+def _row(driver, oracle, market, bet=0.0, won=False, pos=None, fav=False, pnl=0.0):
+    return {"driver": driver, "oracle": oracle, "market_mid": market,
+            "bet_size": bet, "won": won, "position": pos, "is_favorite": fav,
+            "pnl": pnl, "edge": (oracle - market) if (oracle is not None and market is not None) else None}
+
+
+def test_weekend_review_headlines_faded_favorite_that_hit():
+    # ANT was a favorite the model rated below market (faded), and it won.
+    weekend = {
+        "race_name": "Canadian Grand Prix",
+        "bet_time": None,
+        "by_market": {
+            "race_winner": [
+                _row("ANT", 0.21, 0.325, fav=True, won=True, pos=1),
+                _row("RUS", 0.30, 0.425, fav=True, won=False, pos=None),
+                _row("NOR", 0.22, 0.11,  bet=71.15, won=False, pos=None, pnl=-71.15),
+            ],
+        },
+    }
+    msg = format_weekend_review(weekend)
+    assert "Canadian Grand Prix" in msg
+    assert "1/1" not in msg  # NOR lost
+    assert "0/1 won" in msg or "0/1" in msg  # one bet, lost
+    assert "faded favorite(s) hit" in msg
+    assert "ANT" in msg and "P1" in msg
+
+
+def test_weekend_review_silent_when_no_faded_hit():
+    weekend = {
+        "race_name": "Spanish GP", "bet_time": None,
+        "by_market": {"race_winner": [
+            _row("X", 0.10, 0.40, fav=True, won=False, pos=5),  # faded fav, missed
+            _row("Y", 0.15, 0.10, bet=20.0, won=True, pos=1, pnl=170.0),
+        ]},
+    }
+    msg = format_weekend_review(weekend)
+    assert "faded favorite(s) hit" not in msg
+    assert "value strategy held up" in msg
+    assert "1/1" in msg  # 1 of 1 bet won
+
+
+def test_weekend_review_no_bets_placed():
+    weekend = {"race_name": "Monaco GP", "bet_time": None, "by_market": {}}
+    msg = format_weekend_review(weekend)
+    assert "No bets placed" in msg

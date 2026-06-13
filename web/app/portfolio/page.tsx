@@ -1,8 +1,22 @@
+import type { Metadata } from "next";
 import { getPortfolioSnapshots, getActiveRace } from "@/lib/queries";
 import PortfolioChart from "./PortfolioChart";
 import { StatCard, SectionCard } from "@/app/components/ui";
 
 export const revalidate = 300;
+
+export const metadata: Metadata = {
+  title: "Portfolio — F1 Oracle",
+  description:
+    "F1 Oracle's running half-Kelly portfolio against Kalshi F1 markets. Bankroll, edge, hit rate, and per-race PnL.",
+  alternates: { canonical: "/portfolio" },
+  openGraph: {
+    title: "Portfolio — F1 Oracle",
+    description: "Half-Kelly portfolio performance vs Kalshi F1 markets.",
+    url: "/portfolio",
+    type: "website",
+  },
+};
 
 const STARTING = 1000.0;
 const MONO = "var(--font-geist-mono), ui-monospace, monospace";

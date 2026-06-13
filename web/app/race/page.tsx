@@ -1,7 +1,22 @@
+import type { Metadata } from "next";
 import { getActiveRace, getRacePredictions } from "@/lib/queries";
 import RaceView from "./RaceView";
 
 export const revalidate = 300; // re-fetch every 5 minutes
+
+export const metadata: Metadata = {
+  title: "Race — F1 Oracle",
+  description:
+    "Live F1 race weekend predictions vs Kalshi markets — race winner, podium, and pole position with calibrated probabilities.",
+  alternates: { canonical: "/race" },
+  openGraph: {
+    title: "Race — F1 Oracle",
+    description:
+      "Calibrated F1 predictions for the current race weekend vs Kalshi markets.",
+    url: "/race",
+    type: "website",
+  },
+};
 
 export default async function RacePage() {
   const race = await getActiveRace();

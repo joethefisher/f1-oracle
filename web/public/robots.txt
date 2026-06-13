@@ -1,0 +1,5 @@
+User-Agent: *
+Allow: /
+
+Sitemap: https://joeking.ai/sitemap.xml
+Host: https://joeking.ai
